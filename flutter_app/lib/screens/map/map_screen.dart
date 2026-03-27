@@ -38,6 +38,7 @@ import '../../widgets/pro_preview_card.dart';
 import '../booking/booking_flow_screen.dart';
 import '../booking/bookings_list_screen.dart';
 import '../chat/conversations_screen.dart';
+import '../payment/pro_earnings_screen.dart';
 import '../profile/pro_profile_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -101,6 +102,19 @@ class _MapScreenState extends State<MapScreen> {
               // TODO: Navigate to notifications screen
             },
           ),
+          // Earnings button (only for pros)
+          if (auth.currentUser?.userType != 'client')
+            IconButton(
+              icon: const Icon(Icons.account_balance_wallet_outlined),
+              tooltip: 'Earnings',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const ProEarningsScreen(),
+                  ),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.person_outline),
             onPressed: () {

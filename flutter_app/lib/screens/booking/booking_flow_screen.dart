@@ -26,8 +26,10 @@ import 'package:provider/provider.dart';
 import '../../models/booking_model.dart';
 import '../../providers/location_provider.dart';
 import '../../services/booking_service.dart';
+import '../../services/payment_service.dart';
 import '../../services/pro_service.dart';
 import '../../utils/constants.dart';
+import '../payment/payment_checkout_screen.dart';
 
 class BookingFlowScreen extends StatefulWidget {
   /// The pro being booked
@@ -525,15 +527,57 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // SUBMIT THE BOOKING
+  // SUBMIT THE BOOKING (with Payment)
   // ============================================
   // Called when user taps "Confirm Booking" on the last step.
+  //
+  // FLOW:
+  // 1. Open Yoco checkout (client enters card details)
+  // 2. If payment succeeds → create the booking in database
+  // 3. Show confirmation screen
+  //
+  // WHY PAYMENT FIRST?
+  // We want to make sure the client can pay before creating
+  // the booking. Otherwise, the pro gets a notification for a
+  // booking that has no payment behind it.
 
   Future<void> _submitBooking() async {
     setState(() => _isSubmitting = true);
 
     final location = context.read<LocationProvider>();
+    final service = _selectedService!;
+    final commission = service.price * (AppConstants.commissionRate / 100);
+    final total = service.price + AppConstants.bookingFee + commission;
 
+    // ============================================
+    // STEP 1: Open Yoco Payment Checkout
+    // ============================================
+    final paymentResult = await Navigator.of(context).push<PaymentResult>(
+      MaterialPageRoute(
+        builder: (_) => PaymentCheckoutScreen(
+          bookingId: '', // We'll create the booking after payment
+          amount: total,
+          serviceName: service.serviceName,
+          proName: widget.proName,
+        ),
+      ),
+    );
+
+    // Check if payment was successful
+    if (paymentResult != PaymentResult.success) {
+      setState(() => _isSubmitting = false);
+      if (!mounted) return;
+
+      if (paymentResult == PaymentResult.failed) {
+        _showError('Payment failed. Please try again or use a different card.');
+      }
+      // If cancelled, just return to the review step silently
+      return;
+    }
+
+    // ============================================
+    // STEP 2: Create the Booking (payment succeeded)
+    // ============================================
     // Build the scheduled start time (if scheduled booking)
     DateTime? scheduledStart;
     if (widget.bookingType == 'scheduled' &&
@@ -550,7 +594,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
     final result = await _bookingService.createBooking(
       proId: widget.proUserId,
-      serviceId: _selectedService!.id,
+      serviceId: service.id,
       bookingType: widget.bookingType,
       serviceAddress: _useCurrentLocation ? 'Client\'s current location' : _address,
       serviceLatitude: _useCurrentLocation ? location.latitude : null,
@@ -566,7 +610,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     if (!mounted) return;
 
     if (result != null) {
-      // Success! Show confirmation and go to booking detail
+      // ============================================
+      // STEP 3: Show Confirmation
+      // ============================================
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => BookingConfirmationScreen(

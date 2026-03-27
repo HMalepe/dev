@@ -46,6 +46,19 @@ class AppConstants {
   static const String googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY_HERE';
 
   // ============================================
+  // YOCO PAYMENT
+  // ============================================
+  // Yoco is South Africa's payment processor.
+  // The PUBLIC key goes here (safe to put in app code).
+  // The SECRET key goes in Supabase Edge Function secrets (NEVER in app code).
+  //
+  // Get your keys at: yoco.com → Dashboard → Developers → API Keys
+  // Use sk_test_ keys during development, sk_live_ for production.
+
+  static const String yocoPublicKey = 'YOUR_YOCO_PUBLIC_KEY_HERE';
+  // Example: 'pk_test_abc123def456'
+
+  // ============================================
   // APP COLORS
   // ============================================
   // These define VouchSA's look and feel.
