@@ -1,0 +1,106 @@
+<!-- ============================================
+     VouchSA Android Configuration
+     ============================================
+
+     WHAT IS THIS FILE?
+     AndroidManifest.xml tells Android what your app needs:
+     - What permissions it requires (location, internet, camera)
+     - What API keys it uses (Google Maps)
+     - Basic app metadata (name, icon, theme)
+
+     HOW TO SET UP:
+     1. Replace YOUR_GOOGLE_MAPS_API_KEY with your actual key
+     2. Get a key at: https://console.cloud.google.com
+     3. Enable "Maps SDK for Android" in the Google Cloud Console
+     ============================================ -->
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ============================================
+         PERMISSIONS
+         ============================================
+         These tell Android what hardware/features your app needs.
+         The user will be asked to approve some of these. -->
+
+    <!-- Internet access (needed for Supabase, Google Maps, everything) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- GPS location (needed for the map and finding nearby pros) -->
+    <!-- ACCESS_FINE_LOCATION = precise GPS (within ~10 meters) -->
+    <!-- ACCESS_COARSE_LOCATION = approximate (~100 meters, uses cell towers) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+
+    <!-- Background location (needed for pros to track while app is minimized) -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+
+    <!-- Camera (for profile photos and portfolio) -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <!-- Vibration (for notifications) -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
+
+    <!-- Push notifications -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <application
+        android:label="VouchSA"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+
+        <!-- ============================================
+             GOOGLE MAPS API KEY
+             ============================================
+             IMPORTANT: Replace the value below with YOUR key!
+
+             Steps to get a key:
+             1. Go to console.cloud.google.com
+             2. Create a project (or select existing)
+             3. Enable "Maps SDK for Android"
+             4. Go to Credentials → Create Credentials → API Key
+             5. Copy the key and paste it below
+             ============================================ -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="YOUR_GOOGLE_MAPS_API_KEY_HERE"/>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+
+            <!-- This tells Android this is the main/launch activity -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Don't extract native libraries (makes APK smaller) -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+
+    <!-- Query for URL handling (needed for url_launcher package) -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+        <!-- WhatsApp deep link -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="whatsapp" />
+        </intent>
+    </queries>
+</manifest>

@@ -19,6 +19,7 @@ import 'package:provider/provider.dart';
 
 import 'providers/auth_provider.dart';
 import 'providers/location_provider.dart';
+import 'providers/map_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/map/map_screen.dart';
 import 'utils/constants.dart';
@@ -56,6 +57,8 @@ class VouchSAApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         // Manages GPS location: where is the user right now?
         ChangeNotifierProvider(create: (_) => LocationProvider()),
+        // Manages map data: nearby pros, filters, selected pro
+        ChangeNotifierProvider(create: (_) => MapProvider()),
       ],
       child: MaterialApp(
         title: 'VouchSA',
