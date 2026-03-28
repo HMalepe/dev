@@ -22,6 +22,7 @@ import 'providers/location_provider.dart';
 import 'providers/map_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/map/map_screen.dart';
+import 'services/notification_service.dart';
 import 'utils/constants.dart';
 
 /// This is the very first function that runs when the app opens.
@@ -37,6 +38,15 @@ void main() async {
     url: AppConstants.supabaseUrl,
     anonKey: AppConstants.supabaseAnonKey,
   );
+
+  // Initialize push notifications (Firebase Cloud Messaging)
+  // This requests permission and saves the device token.
+  // If Firebase isn't configured yet, it silently skips.
+  try {
+    await NotificationService().initialize();
+  } catch (_) {
+    // Firebase not configured yet — that's fine during development
+  }
 
   // Start the app!
   runApp(const VouchSAApp());

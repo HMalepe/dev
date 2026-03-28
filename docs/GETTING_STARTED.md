@@ -161,7 +161,45 @@ More than enough for development and early launch.
 
 ---
 
-## Step 5: Set Up the Flutter Project
+## Step 4b: Set Up Firebase (Push Notifications)
+
+**Why?**
+Firebase Cloud Messaging (FCM) sends push notifications to users even
+when the app is closed — like "Your booking was accepted!"
+
+1. Go to [console.firebase.google.com](https://console.firebase.google.com)
+2. Click "Add project" → Name it "VouchSA"
+3. Disable Google Analytics (not needed for notifications)
+4. Click "Create project"
+
+**Add your Android app:**
+
+5. Click the Android icon on the project overview page
+6. Enter package name: `com.vouchsa.app`
+7. Click "Register app"
+8. Download `google-services.json`
+9. Place it in: `flutter_app/android/app/google-services.json`
+10. Skip the "Add Firebase SDK" steps (already in pubspec.yaml)
+
+**Get your server key (for Edge Functions):**
+
+11. In Firebase Console → Project Settings → "Service accounts"
+12. Click "Generate new private key"
+13. Save the downloaded JSON file
+14. Add it as a Supabase secret:
+    ```
+    supabase secrets set FIREBASE_SERVICE_ACCOUNT_KEY='<paste entire JSON file contents>'
+    ```
+
+**Also run this SQL migration:**
+
+15. In Supabase SQL Editor, paste and run `supabase/migrations/003_device_tokens.sql`
+
+**Cost:** Free. FCM has no usage limits for push notifications.
+
+---
+
+## Step 5: Set Up the Flutter Project (Connect Everything)
 
 Now let's connect everything:
 
@@ -229,7 +267,7 @@ Now that everything is set up, here's the order to build features:
 - ✅ OTP verification screen
 - ✅ Profile setup screen (client/pro/both selection)
 - ✅ Auth Edge Function (Supabase + Twilio OTP)
-- [ ] Profile photo upload (add camera/gallery picker)
+- [x] Profile photo upload (camera/gallery picker)
 - [ ] Pro service setup wizard (pick categories, set prices)
 
 ### The Map - DONE
@@ -264,9 +302,9 @@ Now that everything is set up, here's the order to build features:
 - ✅ Logout flow
 
 ### Still Needed (Your Next Steps)
-- [ ] Profile photo upload (camera/gallery → Supabase Storage)
+- [x] Profile photo upload (camera/gallery → Supabase Storage)
 - [ ] Voice/video intro recording and playback
-- [ ] Push notifications via Firebase Cloud Messaging
+- [x] Push notifications via Firebase Cloud Messaging (code built, needs Firebase project setup)
 - [ ] Automated payout processing (currently manual via Yoco dashboard)
 - [ ] App icon and splash screen
 - [ ] Testing on real Android device

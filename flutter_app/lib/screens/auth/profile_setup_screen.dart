@@ -10,6 +10,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/photo_service.dart';
 import '../../utils/constants.dart';
 import '../map/map_screen.dart';
 
@@ -22,12 +23,24 @@ class ProfileSetupScreen extends StatefulWidget {
 
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final _nameController = TextEditingController();
+  final _photoService = PhotoService();
   String _selectedUserType = 'client'; // Default
+  String? _profilePhotoUrl;
+  bool _isUploadingPhoto = false;
 
   @override
   void dispose() {
     _nameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickPhoto() async {
+    setState(() => _isUploadingPhoto = true);
+    final url = await _photoService.pickAndUploadProfilePhoto(context);
+    setState(() {
+      _isUploadingPhoto = false;
+      if (url != null) _profilePhotoUrl = url;
+    });
   }
 
   @override
@@ -38,7 +51,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           appBar: AppBar(
             title: const Text('Set Up Your Profile'),
           ),
-          body: Padding(
+          body: SingleChildScrollView(
             padding: const EdgeInsets.all(24.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -52,7 +65,55 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   'Let\'s get you set up.',
                   style: TextStyle(fontSize: 16, color: Colors.grey[600]),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
+
+                // ============================================
+                // PROFILE PHOTO
+                // ============================================
+                Center(
+                  child: GestureDetector(
+                    onTap: _isUploadingPhoto ? null : _pickPhoto,
+                    child: Stack(
+                      children: [
+                        CircleAvatar(
+                          radius: 55,
+                          backgroundColor: Colors.grey[200],
+                          backgroundImage: _profilePhotoUrl != null
+                              ? NetworkImage(_profilePhotoUrl!)
+                              : null,
+                          child: _isUploadingPhoto
+                              ? const CircularProgressIndicator()
+                              : _profilePhotoUrl == null
+                                  ? Icon(Icons.person,
+                                      size: 55, color: Colors.grey[400])
+                                  : null,
+                        ),
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AppConstants.primaryColor,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Icon(Icons.camera_alt,
+                                size: 18, color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Center(
+                  child: Text(
+                    'Add a profile photo',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                  ),
+                ),
+                const SizedBox(height: 24),
 
                 // ============================================
                 // USER TYPE SELECTION
@@ -63,7 +124,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 ),
                 const SizedBox(height: 12),
 
-                // Three options as selectable cards
                 _UserTypeCard(
                   title: 'Find Services',
                   subtitle: 'Book barbers, cleaners, gardeners near me',
@@ -102,7 +162,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   ),
                 ),
 
-                const Spacer(),
+                const SizedBox(height: 32),
 
                 // ============================================
                 // CONTINUE BUTTON
@@ -124,6 +184,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                             displayName: name,
                             userType: _selectedUserType,
                           );
+
+                          // Save profile photo if one was uploaded
+                          if (success && _profilePhotoUrl != null) {
+                            await _photoService
+                                .updateProfilePhoto(_profilePhotoUrl!);
+                          }
 
                           if (success && context.mounted) {
                             Navigator.of(context).pushReplacement(

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../providers/auth_provider.dart';
+import '../../services/photo_service.dart';
 import '../../utils/constants.dart';
 import '../auth/login_screen.dart';
 
@@ -17,9 +18,11 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _supabase = Supabase.instance.client;
+  final _photoService = PhotoService();
   Map<String, dynamic>? _profile;
   Map<String, dynamic>? _proProfile;
   bool _isLoading = true;
+  bool _isUploadingPhoto = false;
 
   @override
   void initState() {
@@ -190,14 +193,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: AppConstants.primaryColor.withOpacity(0.05),
                   child: Column(
                     children: [
-                      CircleAvatar(
-                        radius: 50,
-                        backgroundImage: _profile?['profile_photo_url'] != null
-                            ? NetworkImage(_profile!['profile_photo_url'])
-                            : null,
-                        child: _profile?['profile_photo_url'] == null
-                            ? const Icon(Icons.person, size: 50)
-                            : null,
+                      GestureDetector(
+                        onTap: _isUploadingPhoto
+                            ? null
+                            : () async {
+                                setState(() => _isUploadingPhoto = true);
+                                final url = await _photoService
+                                    .changeProfilePhoto(context);
+                                setState(() {
+                                  _isUploadingPhoto = false;
+                                  if (url != null) {
+                                    _profile?['profile_photo_url'] = url;
+                                  }
+                                });
+                                if (url != null && mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text('Photo updated')),
+                                  );
+                                }
+                              },
+                        child: Stack(
+                          children: [
+                            CircleAvatar(
+                              radius: 50,
+                              backgroundImage:
+                                  _profile?['profile_photo_url'] != null
+                                      ? NetworkImage(
+                                          _profile!['profile_photo_url'])
+                                      : null,
+                              child: _isUploadingPhoto
+                                  ? const CircularProgressIndicator()
+                                  : _profile?['profile_photo_url'] == null
+                                      ? const Icon(Icons.person, size: 50)
+                                      : null,
+                            ),
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: AppConstants.primaryColor,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: Colors.white, width: 2),
+                                ),
+                                child: const Icon(Icons.camera_alt,
+                                    size: 16, color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 12),
                       Text(
