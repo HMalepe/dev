@@ -7,6 +7,8 @@ import '../../services/photo_service.dart';
 import '../../utils/constants.dart';
 import '../auth/login_screen.dart';
 import '../pro_setup/manage_services_screen.dart';
+import '../pro_setup/portfolio_screen.dart';
+import '../pro_setup/record_intro_screen.dart';
 
 /// User profile and app settings screen.
 /// Shows personal info, pro settings (if applicable), and app preferences.
@@ -370,6 +372,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Navigator.of(context).push(
                         MaterialPageRoute(
                             builder: (_) => const ManageServicesScreen()),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.photo_library),
+                    title: const Text('My Portfolio'),
+                    subtitle: const Text('Upload work samples'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const PortfolioScreen()),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.mic),
+                    title: const Text('Voice Intro'),
+                    subtitle: const Text('Record a 30-second intro'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const RecordIntroScreen()),
                       );
                     },
                   ),

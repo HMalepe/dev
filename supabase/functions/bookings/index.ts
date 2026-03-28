@@ -328,8 +328,24 @@ serve(async (req: Request) => {
         action_url: `/bookings/${bookingId}/vouch`,
       });
 
-      // TODO: Trigger payment capture from escrow
-      // await capturePayment(bookingId);
+      // Trigger automated payment capture and pro payout
+      try {
+        const paymentsUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/payments`;
+        await fetch(paymentsUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify({
+            action: "capture_and_payout",
+            booking_id: bookingId,
+          }),
+        });
+      } catch (_captureError) {
+        // Payment capture failed — admin can trigger manually
+        console.error("Auto-capture failed for booking:", bookingId);
+      }
 
       return new Response(
         JSON.stringify({

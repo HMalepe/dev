@@ -22,6 +22,7 @@ import 'providers/location_provider.dart';
 import 'providers/map_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/map/map_screen.dart';
+import 'screens/splash/splash_screen.dart';
 import 'services/notification_service.dart';
 import 'utils/constants.dart';
 
@@ -116,12 +117,9 @@ class VouchSAApp extends StatelessWidget {
         // ============================================
         // STARTING SCREEN
         // ============================================
-        // Check if user is already logged in:
-        // - Yes → Show the map screen (home)
-        // - No → Show the login screen
-        home: Supabase.instance.client.auth.currentSession != null
-            ? const MapScreen()
-            : const LoginScreen(),
+        // Show splash screen first — it handles navigation
+        // to login or map screen after a brief branded loading screen.
+        home: const SplashScreen(),
       ),
     );
   }

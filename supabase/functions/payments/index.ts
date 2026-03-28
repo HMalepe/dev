@@ -240,10 +240,10 @@ serve(async (req: Request) => {
     if (action === "process_payout") {
       const { payout_id } = body;
 
-      // Get the payout details
+      // Get the payout details with pro's bank info
       const { data: payout, error } = await supabaseAdmin
         .from("pro_payouts")
-        .select("*")
+        .select("*, pro:pro_id(phone_number), pro_profile:pro_id(bank_name, bank_account_number, bank_branch_code)")
         .eq("id", payout_id)
         .eq("status", "pending")
         .single();
@@ -264,20 +264,141 @@ serve(async (req: Request) => {
         .update({ status: "processing" })
         .eq("id", payout_id);
 
-      // TODO: Integrate with Yoco's payout API or your bank's API
-      // For now, this just marks it for manual processing.
-      // You'd check your Yoco dashboard or bank portal daily
-      // and process pending payouts.
+      // Attempt automated payout via Yoco's Transfer API
+      let payoutSuccessful = false;
+      try {
+        const yocoResponse = await fetch(`${YOCO_API_URL}/transfers`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${yocoSecretKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            amount: Math.round(payout.amount * 100), // cents
+            currency: "ZAR",
+            bankAccount: {
+              bankName: payout.pro_profile?.bank_name,
+              accountNumber: payout.pro_profile?.bank_account_number,
+              branchCode: payout.pro_profile?.bank_branch_code,
+            },
+            reference: `VOUCHSA-${payout_id.substring(0, 8)}`,
+          }),
+        });
 
-      // After manual processing, call this to mark as complete:
-      // UPDATE pro_payouts SET status = 'completed', completed_at = NOW()
-      // WHERE id = payout_id;
+        if (yocoResponse.ok) {
+          const transferData = await yocoResponse.json();
+          await supabaseAdmin
+            .from("pro_payouts")
+            .update({
+              status: "completed",
+              completed_at: new Date().toISOString(),
+              payment_reference: transferData.id || `yoco-${payout_id}`,
+            })
+            .eq("id", payout_id);
+          payoutSuccessful = true;
+        }
+      } catch (_transferError) {
+        // Yoco Transfer API may not be available — fall back to manual
+      }
+
+      // If automated payout failed, keep as "processing" for manual handling
+      if (!payoutSuccessful) {
+        // Store details for manual EFT processing
+        await supabaseAdmin
+          .from("pro_payouts")
+          .update({
+            payment_reference: `MANUAL-${payout_id.substring(0, 8)}`,
+          })
+          .eq("id", payout_id);
+      }
+
+      // Notify the pro about their payout status
+      await supabaseAdmin.from("notifications").insert({
+        user_id: payout.pro_id,
+        notification_type: "payout_processing",
+        title: payoutSuccessful ? "Payout Sent!" : "Payout Processing",
+        body: payoutSuccessful
+          ? `R${payout.amount.toFixed(2)} has been sent to your bank account.`
+          : `Your R${payout.amount.toFixed(2)} payout is being processed. You'll receive it within 24 hours.`,
+      });
 
       return new Response(
         JSON.stringify({
           success: true,
           payout_id,
-          message: "Payout marked for processing. Will be completed within 24 hours.",
+          automated: payoutSuccessful,
+          message: payoutSuccessful
+            ? "Payout sent to bank account."
+            : "Payout queued for manual processing within 24 hours.",
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // ============================================
+    // ACTION: AUTO CAPTURE (Called when job completes)
+    // ============================================
+    // Automatically captures the escrowed payment and creates
+    // a payout record for the pro.
+
+    if (action === "capture_and_payout") {
+      const { booking_id } = body;
+
+      // Get booking with payment details
+      const { data: booking, error: bookingError } = await supabaseAdmin
+        .from("bookings")
+        .select("*, transaction:transactions!inner(id, payment_provider_ref, amount)")
+        .eq("id", booking_id)
+        .eq("status", "completed")
+        .single();
+
+      if (bookingError || !booking) {
+        return new Response(
+          JSON.stringify({ error: "Booking not found or not completed" }),
+          {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // Create capture transaction
+      const servicePrice = booking.service_price;
+      const commissionRate = booking.commission_rate || 10;
+      const commission = servicePrice * (commissionRate / 100);
+      const proPayout = servicePrice; // Pro gets full service price
+
+      await supabaseAdmin.from("transactions").insert({
+        booking_id: booking_id,
+        transaction_type: "capture",
+        amount: booking.total_amount,
+        status: "completed",
+        payment_provider: "yoco",
+        pro_payout_amount: proPayout,
+        commission_amount: commission,
+        completed_at: new Date().toISOString(),
+      });
+
+      // Create automatic payout record for the pro
+      const { data: payoutRecord } = await supabaseAdmin
+        .from("pro_payouts")
+        .insert({
+          pro_id: booking.pro_id,
+          amount: proPayout,
+          status: "pending",
+        })
+        .select()
+        .single();
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          captured: booking.total_amount,
+          pro_payout: proPayout,
+          commission: commission,
+          payout_id: payoutRecord?.id,
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

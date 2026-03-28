@@ -50,6 +50,8 @@ dependencies:
   image_picker: ^1.0.7             # Pick photos from gallery or camera
   cached_network_image: ^3.3.1     # Load and cache images from the internet (pro photos)
   video_player: ^2.8.2             # Play 30-second intro videos
+  record: ^5.0.4                   # Record audio (voice intros)
+  path_provider: ^2.1.2            # Access temp directories for recordings
 
   # --- State Management ---
   # (How the app keeps track of what's happening — like "is the user logged in?")
