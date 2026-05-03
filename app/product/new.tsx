@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useCart } from '@/hooks/useCart';
 import { useInventory } from '@/hooks/useInventory';
 import { Button } from '@/components/ui/Button';
 import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
 
 export default function NewProductScreen() {
   const { barcode: initialBarcode } = useLocalSearchParams<{ barcode?: string }>();
-  const [shopId, setShopId] = useState<string | null>(null);
+  const shopId = useCart((s) => s.shopId);
   const { addProduct } = useInventory(shopId);
 
   const [barcode, setBarcode] = useState(initialBarcode ?? '');
@@ -17,10 +17,6 @@ export default function NewProductScreen() {
   const [quantity, setQuantity] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    AsyncStorage.getItem('shop_id').then((id) => { if (id) setShopId(id); });
-  }, []);
 
   const handleSave = async () => {
     if (!name || !price || !quantity) {
@@ -45,8 +41,18 @@ export default function NewProductScreen() {
     setLoading(true);
     try {
       await addProduct(
-        { barcode: barcode || `manual-${Date.now()}`, name, category: null, default_price: parsedPrice, image_url: null },
-        { quantity: parsedQty, selling_price: parsedPrice, expiry_date: expiryDate || undefined }
+        {
+          barcode: barcode || `manual-${Date.now()}`,
+          name,
+          category: null,
+          default_price: parsedPrice,
+          image_url: null,
+        },
+        {
+          quantity: parsedQty,
+          selling_price: parsedPrice,
+          expiry_date: expiryDate || undefined,
+        }
       );
       Alert.alert('Product added!', `${name} is now in your inventory.`, [
         { text: 'Done', onPress: () => router.back() },

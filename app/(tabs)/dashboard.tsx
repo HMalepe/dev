@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
+import { useCart } from '@/hooks/useCart';
 import { getTodaySales, getPendingSyncCount, getInventoryByShop, getExpiringInventory } from '@/lib/db';
 import { useSync } from '@/hooks/useSync';
 import { SyncStatusBar } from '@/components/ui/SyncStatusBar';
@@ -12,7 +13,7 @@ import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
 import { DashboardStats } from '@/types';
 
 export default function DashboardScreen() {
-  const [shopId, setShopId] = useState<string | null>(null);
+  const shopId = useCart((s) => s.shopId);
   const [shopName, setShopName] = useState('');
   const [stats, setStats] = useState<DashboardStats>({
     today_sales_count: 0,
@@ -23,11 +24,10 @@ export default function DashboardScreen() {
   });
   const { syncStatus, pendingCount, triggerSync } = useSync();
 
-  const loadShop = useCallback(async () => {
-    const id = await AsyncStorage.getItem('shop_id');
-    const name = await AsyncStorage.getItem('shop_name');
-    if (id) setShopId(id);
-    if (name) setShopName(name);
+  useEffect(() => {
+    AsyncStorage.getItem('shop_name').then((name) => {
+      if (name) setShopName(name);
+    });
   }, []);
 
   const loadStats = useCallback(async () => {
@@ -47,8 +47,6 @@ export default function DashboardScreen() {
       pending_sync_count: pendingSync,
     });
   }, [shopId]);
-
-  useEffect(() => { loadShop(); }, [loadShop]);
 
   useFocusEffect(useCallback(() => {
     loadStats();

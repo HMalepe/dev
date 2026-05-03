@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useCart } from '@/hooks/useCart';
 import { useInventory } from '@/hooks/useInventory';
 import { StockCard } from '@/components/inventory/StockCard';
 import { Button } from '@/components/ui/Button';
@@ -10,15 +10,9 @@ import { InventoryItem, Product } from '@/types';
 
 export default function ProductDetailScreen() {
   const { barcode } = useLocalSearchParams<{ barcode: string }>();
-  const [shopId, setShopId] = useState<string | null>(null);
+  const shopId = useCart((s) => s.shopId);
   const { inventory, loading, refresh, updateQuantity } = useInventory(shopId);
   const [item, setItem] = useState<(InventoryItem & { product: Product }) | null>(null);
-
-  useEffect(() => {
-    AsyncStorage.getItem('shop_id').then((id) => {
-      if (id) setShopId(id);
-    });
-  }, []);
 
   useEffect(() => {
     if (shopId) refresh();

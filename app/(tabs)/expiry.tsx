@@ -1,19 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useCart } from '@/hooks/useCart';
 import { useInventory } from '@/hooks/useInventory';
 import { ExpiryAlert } from '@/components/expiry/ExpiryAlert';
 import { Colors, FontSize, Spacing } from '@/constants/theme';
 
 export default function ExpiryScreen() {
-  const [shopId, setShopId] = useState<string | null>(null);
+  const shopId = useCart((s) => s.shopId);
   const { expiring, loading, refresh } = useInventory(shopId);
-
-  useEffect(() => {
-    AsyncStorage.getItem('shop_id').then((id) => {
-      if (id) setShopId(id);
-    });
-  }, []);
 
   useEffect(() => {
     if (shopId) refresh();

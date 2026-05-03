@@ -1,21 +1,14 @@
 import React, { useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
+import { useCart } from '@/hooks/useCart';
 import { useInventory } from '@/hooks/useInventory';
 import { StockCard } from '@/components/inventory/StockCard';
 import { Colors, FontSize, Spacing } from '@/constants/theme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useState } from 'react';
 
 export default function InventoryScreen() {
-  const [shopId, setShopId] = useState<string | null>(null);
+  const shopId = useCart((s) => s.shopId);
   const { inventory, loading, refresh, updateQuantity } = useInventory(shopId);
-
-  useEffect(() => {
-    AsyncStorage.getItem('shop_id').then((id) => {
-      if (id) setShopId(id);
-    });
-  }, []);
 
   useEffect(() => {
     if (shopId) refresh();
@@ -32,10 +25,7 @@ export default function InventoryScreen() {
             <Text style={styles.lowStockHint}>{lowStockCount} item{lowStockCount !== 1 ? 's' : ''} low or out of stock</Text>
           )}
         </View>
-        <TouchableOpacity
-          style={styles.addBtn}
-          onPress={() => router.push('/product/new')}
-        >
+        <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/product/new')}>
           <Text style={styles.addBtnText}>+ Add</Text>
         </TouchableOpacity>
       </View>
