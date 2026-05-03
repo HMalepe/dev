@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { COLORS, FONTS, SPACING, SCREEN_PADDING } from '../../constants';
+import ErrorBoundary from '../../components/ErrorBoundary';
 import RecordingCard from '../../components/RecordingCard';
 import StatsBar from '../../components/StatsBar';
 import WatchStatusBanner from '../../components/WatchStatusBanner';
@@ -25,16 +26,8 @@ import {
   MOCK_WATCH_STATE,
   MOCK_PATTERN_ALERTS,
 } from '../../mock/recordings';
+import { relativeTime } from '../../utils/formatting';
 import type { Recording, WatchState } from '../../types';
-
-// ─── Relative time helper ────────────────────────────────────────────────────
-
-function relativeTime(date: Date): string {
-  const diffMin = Math.round((Date.now() - date.getTime()) / 60_000);
-  if (diffMin < 1) return 'just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  return `${Math.floor(diffMin / 60)}h ago`;
-}
 
 // ─── Header ───────────────────────────────────────────────────────────────────
 
@@ -88,7 +81,7 @@ function SectionHeader({ count }: { count: number }) {
 
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 
-export default function HomeScreen() {
+function HomeScreenContent() {
   const insets = useSafeAreaInsets();
   const [recordings] = useState<Recording[]>(MOCK_RECORDINGS);
 
@@ -146,6 +139,14 @@ export default function HomeScreen() {
       />
       <WatchStatusBanner watchState={MOCK_WATCH_STATE} onOpenWatch={() => {}} />
     </View>
+  );
+}
+
+export default function HomeScreen() {
+  return (
+    <ErrorBoundary>
+      <HomeScreenContent />
+    </ErrorBoundary>
   );
 }
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import ErrorBoundary from '../../components/ErrorBoundary';
 import {
   View,
   Text,
@@ -59,7 +60,7 @@ function SettingSection({
 
 // ─── Settings Screen ──────────────────────────────────────────────────────────
 
-export default function SettingsScreen() {
+function SettingsScreenContent() {
   const insets = useSafeAreaInsets();
 
   return (
@@ -177,6 +178,14 @@ export default function SettingsScreen() {
         </View>
       </ScrollView>
     </View>
+  );
+}
+
+export default function SettingsScreen() {
+  return (
+    <ErrorBoundary>
+      <SettingsScreenContent />
+    </ErrorBoundary>
   );
 }
 

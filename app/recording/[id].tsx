@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SPACING, SCREEN_PADDING, RADIUS } from '../../constants';
 import { MOCK_RECORDINGS } from '../../mock/recordings';
 import { getTranscript } from '../../mock/transcripts';
+import { formatDurationShort, formatFullDate } from '../../utils/formatting';
 
 import EnergySparkline from '../../components/EnergySparkline';
 import TalkRatioBar from '../../components/TalkRatioBar';
@@ -22,41 +23,26 @@ import TopicsChart from '../../components/TopicsChart';
 import MomentItem from '../../components/MomentItem';
 import TranscriptView from '../../components/TranscriptView';
 import DetailSection from '../../components/DetailSection';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}m ${s}s`;
-}
-
-function formatDate(date: Date): string {
-  return date
-    .toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    })
-    .toUpperCase();
-}
+import ErrorBoundary from '../../components/ErrorBoundary';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-export default function RecordingDetailScreen() {
+function RecordingDetailContent() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const recording = MOCK_RECORDINGS.find((r) => r.id === id);
   const transcript = id ? getTranscript(id) : undefined;
 
-  // Which moment (if any) is highlighted in the transcript
   const [activeMomentId, setActiveMomentId] = useState<string | undefined>();
 
   const handleMomentPress = useCallback((momentId: string) => {
     setActiveMomentId((prev) => (prev === momentId ? undefined : momentId));
   }, []);
+
+  const goToDeepDive = useCallback(
+    (type: string) => router.push(`/insight/${type}?recordingId=${id}`),
+    [id]
+  );
 
   if (!recording) {
     return (
@@ -82,10 +68,10 @@ export default function RecordingDetailScreen() {
         >
           <Ionicons name="arrow-back" size={20} color={COLORS.textPrimary} />
         </Pressable>
-        <Text style={styles.headerDate}>{formatDate(recording.timestamp)}</Text>
+        <Text style={styles.headerDate}>{formatFullDate(recording.timestamp)}</Text>
         <View style={styles.headerDuration}>
           <Text style={styles.headerDurationText}>
-            {formatDuration(recording.duration)}
+            {formatDurationShort(recording.duration)}
           </Text>
         </View>
       </View>
@@ -103,8 +89,11 @@ export default function RecordingDetailScreen() {
           </View>
         </View>
 
-        {/* ── Confidence Index ── */}
-        <DetailSection title="CONFIDENCE INDEX">
+        {/* ── Confidence Index — tappable → deep dive ── */}
+        <DetailSection
+          title="CONFIDENCE INDEX"
+          onHeaderPress={() => goToDeepDive('confidence-index')}
+        >
           <ConfidenceIndex
             score={recording.confidenceIndex}
             delta={recording.confidenceIndexDelta}
@@ -117,6 +106,7 @@ export default function RecordingDetailScreen() {
           accessory={
             <Text style={styles.sectionAccessory}>{recording.energyArcLabel}</Text>
           }
+          onHeaderPress={() => goToDeepDive('energy-arc')}
         >
           <EnergySparkline data={recording.energyArc} height={52} />
         </DetailSection>
@@ -132,7 +122,7 @@ export default function RecordingDetailScreen() {
         </DetailSection>
 
         {/* ── Talk breakdown ── */}
-        <DetailSection title="TALK BREAKDOWN">
+        <DetailSection title="TALK BREAKDOWN" onHeaderPress={() => goToDeepDive('talk-ratio')}>
           <TalkRatioBar talkRatio={recording.talkRatio} />
         </DetailSection>
 
@@ -142,13 +132,19 @@ export default function RecordingDetailScreen() {
         </DetailSection>
 
         {/* ── Tone profile ── */}
-        <DetailSection title="TONE PROFILE">
+        <DetailSection
+          title="TONE PROFILE"
+          onHeaderPress={() => goToDeepDive('tone-profile')}
+        >
           <ToneBreakdown segments={recording.toneBreakdown} />
         </DetailSection>
 
         {/* ── Questions analysis ── */}
         {recording.questionsAnalysis.length > 0 && (
-          <DetailSection title="QUESTIONS YOU ASKED">
+          <DetailSection
+            title="QUESTIONS YOU ASKED"
+            onHeaderPress={() => goToDeepDive('questions-asked')}
+          >
             <View style={styles.questionsList}>
               {recording.questionsAnalysis.map((qa, i) => (
                 <View key={i} style={styles.questionItem}>
@@ -225,6 +221,14 @@ export default function RecordingDetailScreen() {
         </DetailSection>
       </ScrollView>
     </View>
+  );
+}
+
+export default function RecordingDetailScreen() {
+  return (
+    <ErrorBoundary>
+      <RecordingDetailContent />
+    </ErrorBoundary>
   );
 }
 

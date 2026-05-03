@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ErrorBoundary from '../../components/ErrorBoundary';
 import {
   View,
   Text,
@@ -205,7 +206,7 @@ const BEHAVIORAL_PATTERNS = [
 
 const AI_SYNTHESIS = `Over the last 7 weeks, you've become measurably more deliberate. Your confidence index is up 24 points, you're asking more questions, and your filler words are down nearly half. The gap to close: you still over-talk in high-stakes situations, and you deflect when conversations move toward your co-founder. These two things are probably related. The best version of you showed up on April 30th — board check-in, 91 confidence, 45% talk ratio, 3 fillers. Study that session.`;
 
-export default function InsightsOverview() {
+function InsightsOverviewContent() {
   const insets = useSafeAreaInsets();
   const [timeRange, setTimeRange] = useState<TimeRange>('4W');
 
@@ -327,6 +328,14 @@ export default function InsightsOverview() {
         </View>
       </ScrollView>
     </View>
+  );
+}
+
+export default function InsightsOverview() {
+  return (
+    <ErrorBoundary>
+      <InsightsOverviewContent />
+    </ErrorBoundary>
   );
 }
 
