@@ -11,42 +11,37 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import { COLORS, FONTS, SPACING, SCREEN_PADDING } from '../constants';
-import RecordingCard from '../components/RecordingCard';
-import StatsBar from '../components/StatsBar';
-import WatchStatusBanner from '../components/WatchStatusBanner';
-import InsightsTicker from '../components/InsightsTicker';
-import PatternAlert from '../components/PatternAlert';
-import EmptyState from '../components/EmptyState';
+import { COLORS, FONTS, SPACING, SCREEN_PADDING } from '../../constants';
+import RecordingCard from '../../components/RecordingCard';
+import StatsBar from '../../components/StatsBar';
+import WatchStatusBanner from '../../components/WatchStatusBanner';
+import InsightsTicker from '../../components/InsightsTicker';
+import PatternAlert from '../../components/PatternAlert';
+import EmptyState from '../../components/EmptyState';
 
 import {
   MOCK_RECORDINGS,
   MOCK_WEEK_STATS,
   MOCK_WATCH_STATE,
   MOCK_PATTERN_ALERTS,
-} from '../mock/recordings';
-import type { Recording, WatchState } from '../types';
+} from '../../mock/recordings';
+import type { Recording, WatchState } from '../../types';
 
 // ─── Relative time helper ────────────────────────────────────────────────────
 
 function relativeTime(date: Date): string {
-  const diffMs = Date.now() - date.getTime();
-  const diffMin = Math.round(diffMs / 60_000);
+  const diffMin = Math.round((Date.now() - date.getTime()) / 60_000);
   if (diffMin < 1) return 'just now';
-  if (diffMin === 1) return '1m ago';
   if (diffMin < 60) return `${diffMin}m ago`;
-  const diffH = Math.floor(diffMin / 60);
-  return `${diffH}h ago`;
+  return `${Math.floor(diffMin / 60)}h ago`;
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── Header ───────────────────────────────────────────────────────────────────
 
 function Header({
   watchState,
-  onSettingsPress,
 }: {
   watchState: WatchState;
-  onSettingsPress: () => void;
 }) {
   const isRecording = watchState.status === 'recording';
   const isSyncing = watchState.status === 'syncing';
@@ -65,19 +60,15 @@ function Header({
 
   return (
     <View style={styles.header}>
-      {/* App wordmark */}
       <Text style={styles.wordmark}>ECHO</Text>
-
-      {/* Watch sync status — center */}
       <View style={styles.watchStatus}>
         <View style={[styles.watchDot, { backgroundColor: watchDotColor }]} />
         <Text style={styles.watchLabel}>{watchLabel}</Text>
       </View>
-
-      {/* Settings */}
+      {/* Settings navigates to the settings tab */}
       <Pressable
-        style={({ pressed }) => [styles.headerButton, pressed && styles.headerButtonPressed]}
-        onPress={onSettingsPress}
+        style={({ pressed }) => [styles.headerButton, pressed && { opacity: 0.5 }]}
+        onPress={() => router.push('/settings')}
         hitSlop={12}
       >
         <Ionicons name="settings-outline" size={18} color={COLORS.textSecondary} />
@@ -86,10 +77,10 @@ function Header({
   );
 }
 
-function SectionHeader({ title, count }: { title: string; count: number }) {
+function SectionHeader({ count }: { count: number }) {
   return (
     <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text style={styles.sectionTitle}>RECENT SESSIONS</Text>
       <Text style={styles.sectionCount}>{count}</Text>
     </View>
   );
@@ -105,11 +96,6 @@ export default function HomeScreen() {
     router.push(`/recording/${id}`);
   }, []);
 
-  const handleSettingsPress = useCallback(() => {
-    router.push('/settings');
-  }, []);
-
-  // Renders each recording card — called by FlatList
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<Recording>) => (
       <RecordingCard
@@ -121,47 +107,28 @@ export default function HomeScreen() {
     [handleRecordingPress]
   );
 
-  // Everything above the recording list renders as FlatList header component.
-  // This keeps scrolling seamless — header scrolls with the list.
   const ListHeader = useCallback(
     () => (
       <View>
-        {/* ── Insights ticker ── */}
         <InsightsTicker stats={MOCK_WEEK_STATS} />
-
-        {/* ── Stats dashboard ── */}
         <View style={styles.statsSection}>
           <StatsBar stats={MOCK_WEEK_STATS} />
         </View>
-
-        {/* ── Pattern alert (AI cross-session insight) ── */}
         {MOCK_PATTERN_ALERTS.length > 0 && (
           <PatternAlert alert={MOCK_PATTERN_ALERTS[0]} />
         )}
-
-        {/* ── Section heading ── */}
-        <SectionHeader
-          title="RECENT SESSIONS"
-          count={recordings.length}
-        />
+        <SectionHeader count={recordings.length} />
       </View>
     ),
     [recordings.length]
   );
 
   const ListEmpty = useCallback(() => <EmptyState />, []);
-
   const keyExtractor = useCallback((item: Recording) => item.id, []);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
-      {/* ── Fixed header — doesn't scroll ── */}
-      <Header
-        watchState={MOCK_WATCH_STATE}
-        onSettingsPress={handleSettingsPress}
-      />
-
-      {/* ── Scrollable recording list with header ── */}
+      <Header watchState={MOCK_WATCH_STATE} />
       <FlatList
         data={recordings}
         keyExtractor={keyExtractor}
@@ -173,29 +140,20 @@ export default function HomeScreen() {
           recordings.length === 0 && styles.listContentEmpty,
         ]}
         showsVerticalScrollIndicator={false}
-        // Performance: recordings don't change in this mock
         removeClippedSubviews
         maxToRenderPerBatch={4}
         initialNumToRender={3}
       />
-
-      {/* ── Fixed bottom Watch status bar ── */}
-      <View style={{ paddingBottom: insets.bottom }}>
-        <WatchStatusBanner watchState={MOCK_WATCH_STATE} onOpenWatch={() => {}} />
-      </View>
+      <WatchStatusBanner watchState={MOCK_WATCH_STATE} onOpenWatch={() => {}} />
     </View>
   );
 }
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
-
-  // ── Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -211,7 +169,6 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontWeight: FONTS.weights.black,
     letterSpacing: FONTS.tracking.widest,
-    // Tight optical correction for all-caps mono wordmark
     marginRight: SPACING.sm,
   },
   watchStatus: {
@@ -235,17 +192,10 @@ const styles = StyleSheet.create({
   headerButton: {
     padding: SPACING.xs,
   },
-  headerButtonPressed: {
-    opacity: 0.5,
-  },
-
-  // ── Stats section
   statsSection: {
     paddingTop: SPACING.xl,
     paddingBottom: SPACING.base,
   },
-
-  // ── Section header
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -270,8 +220,6 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     letterSpacing: FONTS.tracking.wide,
   },
-
-  // ── List
   listContent: {
     paddingBottom: SPACING.xxl,
   },
