@@ -7,6 +7,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { COLORS, FONTS, SPACING, SCREEN_PADDING, RADIUS } from '../constants';
+import { formatDurationShort, formatTimestamp } from '../utils/formatting';
 import EnergySparkline from './EnergySparkline';
 import TalkRatioBar from './TalkRatioBar';
 import InsightTag from './InsightTag';
@@ -15,29 +16,12 @@ import type { Recording } from '../types';
 interface Props {
   recording: Recording;
   onPress: (id: string) => void;
-  // First card in the list gets an accent left-border — most recent = most relevant
   isLatest?: boolean;
-}
-
-// Format seconds → "8m 32s" or "1h 2m"
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m ${s}s`;
-}
-
-// Format timestamp → "MAY 03  2:30 PM"
-function formatTimestamp(date: Date): { date: string; time: string } {
-  const d = date.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }).toUpperCase();
-  const t = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  return { date: d, time: t };
 }
 
 export default function RecordingCard({ recording, onPress, isLatest }: Props) {
   const { date, time } = formatTimestamp(recording.timestamp);
-  const duration = formatDuration(recording.duration);
+  const duration = formatDurationShort(recording.duration);
   const mostRepeated = recording.repeatedThemes[0];
 
   return (

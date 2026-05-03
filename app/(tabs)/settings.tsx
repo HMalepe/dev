@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import ErrorBoundary from '../../components/ErrorBoundary';
 import {
   View,
@@ -6,9 +6,12 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  Alert,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, FONTS, SPACING, SCREEN_PADDING, RADIUS } from '../../constants';
+import { useOnboarding } from '../../hooks/useOnboarding';
 
 // ─── Settings item ────────────────────────────────────────────────────────────
 
@@ -62,6 +65,25 @@ function SettingSection({
 
 function SettingsScreenContent() {
   const insets = useSafeAreaInsets();
+  const { resetOnboarding, userName } = useOnboarding();
+
+  const handleResetOnboarding = useCallback(() => {
+    Alert.alert(
+      'Reset Onboarding',
+      'This will clear your name and show the welcome screen on next launch.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            await resetOnboarding();
+            router.replace('/onboarding');
+          },
+        },
+      ]
+    );
+  }, [resetOnboarding]);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -169,10 +191,19 @@ function SettingsScreenContent() {
             isDestructive
             onPress={() => {}}
           />
+          <SettingRow
+            label="Reset onboarding"
+            hint="Clears your name and shows welcome screen"
+            isDestructive
+            onPress={handleResetOnboarding}
+          />
         </SettingSection>
 
         {/* Build info */}
         <View style={styles.buildInfo}>
+          {userName ? (
+            <Text style={styles.buildText}>Signed in as {userName}</Text>
+          ) : null}
           <Text style={styles.buildText}>ECHO  v1.0.0  ·  BUILD 1</Text>
           <Text style={styles.buildText}>Made for people who take conversations seriously</Text>
         </View>

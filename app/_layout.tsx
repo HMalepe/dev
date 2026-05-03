@@ -37,6 +37,11 @@ function RootLayoutInner() {
         name="insight/[type]"
         options={{ animation: 'slide_from_right' }}
       />
+      {/* Session comparison */}
+      <Stack.Screen
+        name="compare"
+        options={{ animation: 'slide_from_right' }}
+      />
     </Stack>
   );
 }

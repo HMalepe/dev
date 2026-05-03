@@ -5,6 +5,9 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  Modal,
+  Share,
+  FlatList,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,6 +37,7 @@ function RecordingDetailContent() {
   const transcript = id ? getTranscript(id) : undefined;
 
   const [activeMomentId, setActiveMomentId] = useState<string | undefined>();
+  const [comparePickerOpen, setComparePickerOpen] = useState(false);
 
   const handleMomentPress = useCallback((momentId: string) => {
     setActiveMomentId((prev) => (prev === momentId ? undefined : momentId));
@@ -41,6 +45,30 @@ function RecordingDetailContent() {
 
   const goToDeepDive = useCallback(
     (type: string) => router.push(`/insight/${type}?recordingId=${id}`),
+    [id]
+  );
+
+  const handleShare = useCallback(async () => {
+    if (!recording) return;
+    await Share.share({
+      title: recording.title,
+      message: [
+        recording.title,
+        '',
+        recording.summary,
+        '',
+        `Confidence: ${recording.confidenceIndex}/100 · Talk ratio: ${recording.talkRatio}% · Questions: ${recording.questionsAsked}`,
+        '',
+        'Recorded with ECHO',
+      ].join('\n'),
+    });
+  }, [recording]);
+
+  const handleComparePick = useCallback(
+    (otherId: string) => {
+      setComparePickerOpen(false);
+      router.push(`/compare?a=${id}&b=${otherId}`);
+    },
     [id]
   );
 
@@ -69,12 +97,74 @@ function RecordingDetailContent() {
           <Ionicons name="arrow-back" size={20} color={COLORS.textPrimary} />
         </Pressable>
         <Text style={styles.headerDate}>{formatFullDate(recording.timestamp)}</Text>
-        <View style={styles.headerDuration}>
-          <Text style={styles.headerDurationText}>
-            {formatDurationShort(recording.duration)}
-          </Text>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => setComparePickerOpen(true)}
+            hitSlop={8}
+            style={({ pressed }) => [styles.headerAction, pressed && { opacity: 0.5 }]}
+          >
+            <Text style={styles.headerActionText}>↔</Text>
+          </Pressable>
+          <Pressable
+            onPress={handleShare}
+            hitSlop={8}
+            style={({ pressed }) => [styles.headerAction, pressed && { opacity: 0.5 }]}
+          >
+            <Ionicons name="share-outline" size={17} color={COLORS.textSecondary} />
+          </Pressable>
         </View>
       </View>
+
+      {/* ── Compare picker modal ── */}
+      <Modal
+        visible={comparePickerOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setComparePickerOpen(false)}
+      >
+        <View style={styles.modalScreen}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>COMPARE WITH…</Text>
+            <Pressable
+              onPress={() => setComparePickerOpen(false)}
+              hitSlop={12}
+              style={({ pressed }) => pressed && { opacity: 0.5 }}
+            >
+              <Text style={styles.modalClose}>✕</Text>
+            </Pressable>
+          </View>
+          <FlatList
+            data={MOCK_RECORDINGS.filter((r) => r.id !== id)}
+            keyExtractor={(r) => r.id}
+            renderItem={({ item }) => (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.pickerRow,
+                  pressed && styles.pickerRowPressed,
+                ]}
+                onPress={() => handleComparePick(item.id)}
+              >
+                <View style={styles.pickerInfo}>
+                  <Text style={styles.pickerTitle} numberOfLines={1}>
+                    {item.title.toUpperCase()}
+                  </Text>
+                  <Text style={styles.pickerMeta}>
+                    {item.timestamp
+                      .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                      .toUpperCase()}
+                    {' · '}
+                    CI {item.confidenceIndex}
+                    {' · '}
+                    {item.talkRatio}% talk
+                  </Text>
+                </View>
+                <Text style={styles.pickerArrow}>→</Text>
+              </Pressable>
+            )}
+            ItemSeparatorComponent={() => <View style={styles.pickerSep} />}
+          />
+        </View>
+      </Modal>
 
       <ScrollView
         style={styles.scroll}
@@ -271,12 +361,83 @@ const styles = StyleSheet.create({
     letterSpacing: FONTS.tracking.wide,
     flex: 1,
   },
-  headerDuration: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.xs,
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  headerAction: {
+    padding: SPACING.xs,
+  },
+  headerActionText: {
+    fontFamily: FONTS.mono,
+    fontSize: FONTS.sizes.md,
+    color: COLORS.textSecondary,
+    fontWeight: FONTS.weights.bold,
+  },
+  // Modal picker
+  modalScreen: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    paddingTop: SPACING.xl,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SCREEN_PADDING,
+    paddingBottom: SPACING.base,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  modalTitle: {
+    fontFamily: FONTS.mono,
+    fontSize: FONTS.sizes.base,
+    color: COLORS.textPrimary,
+    letterSpacing: FONTS.tracking.label,
+    fontWeight: FONTS.weights.bold,
+  },
+  modalClose: {
+    fontFamily: FONTS.mono,
+    fontSize: FONTS.sizes.base,
+    color: COLORS.textMuted,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SCREEN_PADDING,
+    paddingVertical: SPACING.base,
+    gap: SPACING.base,
+  },
+  pickerRowPressed: {
+    backgroundColor: COLORS.surfaceHover,
+  },
+  pickerInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  pickerTitle: {
+    fontFamily: FONTS.mono,
+    fontSize: FONTS.sizes.base,
+    color: COLORS.textPrimary,
+    letterSpacing: FONTS.tracking.label,
+    fontWeight: FONTS.weights.semibold,
+  },
+  pickerMeta: {
+    fontFamily: FONTS.mono,
+    fontSize: FONTS.sizes.xs,
+    color: COLORS.textMuted,
+    letterSpacing: FONTS.tracking.wide,
+  },
+  pickerArrow: {
+    fontFamily: FONTS.mono,
+    fontSize: FONTS.sizes.base,
+    color: COLORS.textMuted,
+  },
+  pickerSep: {
+    height: 1,
+    backgroundColor: COLORS.borderSubtle,
+    marginHorizontal: SCREEN_PADDING,
   },
   headerDurationText: {
     fontFamily: FONTS.mono,
