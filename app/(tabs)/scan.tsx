@@ -1,13 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { View, Modal, StyleSheet, Text } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, router } from 'expo-router';
 import { BarcodeScanner } from '@/components/scanner/BarcodeScanner';
 import { ProductNotFound } from '@/components/scanner/ProductNotFound';
 import { CartSummary } from '@/components/cart/CartSummary';
 import { useCart } from '@/hooks/useCart';
 import { lookupProduct } from '@/lib/barcode';
 import { Colors, FontSize, Spacing } from '@/constants/theme';
-import { router } from 'expo-router';
 
 type ScanState = 'scanning' | 'found' | 'not_found';
 

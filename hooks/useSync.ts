@@ -43,9 +43,9 @@ export function useSync() {
     else refreshPendingCount();
   }, [isConnected, refreshPendingCount]);
 
-  onReconnect(() => {
-    triggerSync();
-  });
+  useEffect(() => {
+    onReconnect(triggerSync);
+  }, [onReconnect, triggerSync]);
 
   return { syncStatus, pendingCount, triggerSync, refreshPendingCount };
 }

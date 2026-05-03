@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import * as Network from 'expo-network';
 
 export function useNetworkStatus() {
@@ -25,9 +25,9 @@ export function useNetworkStatus() {
     return () => clearInterval(interval);
   }, []);
 
-  const onReconnect = (cb: () => void) => {
+  const onReconnect = useCallback((cb: () => void) => {
     onReconnectRef.current = cb;
-  };
+  }, []);
 
   return { isConnected, onReconnect };
 }

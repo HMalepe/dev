@@ -11,9 +11,8 @@ import { Colors, FontSize, Spacing, BorderRadius } from '@/constants/theme';
 type PayStep = 'review' | 'change_calc' | 'done';
 
 export default function CheckoutScreen() {
-  const { items, getTotal, clearCart } = useCart();
+  const { items, getTotal, clearCart, completeSale } = useCart();
   const { triggerSync } = useSync();
-  const { completeSale } = useCart();
 
   const [step, setStep] = useState<PayStep>('review');
   const [cashReceived, setCashReceived] = useState(0);
