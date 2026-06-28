@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stickman: A Day in the Life</title>
+<style>
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(to bottom, #87ceeb, #f0f9ff);
+    font-family: sans-serif;
+    overflow: hidden;
+  }
+  #stage {
+    width: 400px;
+    height: 400px;
+    position: relative;
+  }
+  svg { width: 100%; height: 100%; }
+  .limb, .torso { stroke: #222; stroke-width: 6; fill: none; stroke-linecap: round; }
+  .head { fill: #222; stroke: none; }
+  #label {
+    margin-top: 12px;
+    font-size: 20px;
+    font-weight: bold;
+    color: #333;
+  }
+  #controls { margin-top: 10px; }
+  button {
+    margin: 0 4px;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    background: #333;
+    color: white;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button:hover { background: #555; }
+
+  /* All limb groups pivot around the shoulder (100,95) or hip (100,150) point */
+  #rUpperArm, #lUpperArm { transform-origin: 100px 95px; }
+  #rUpperLeg, #lUpperLeg { transform-origin: 100px 150px; }
+  #rLowerArm { transform-origin: 100px 135px; }
+  #lLowerArm { transform-origin: 100px 135px; }
+  #rLowerLeg { transform-origin: 100px 200px; }
+  #lLowerLeg { transform-origin: 100px 200px; }
+
+  /* default resting pose */
+  #rUpperArm, #lUpperArm, #rUpperLeg, #lUpperLeg,
+  #rLowerArm, #lLowerArm, #rLowerLeg, #lLowerLeg {
+    transform: rotate(0deg);
+  }
+
+  /* ---------- SCENE: WAKE UP / STRETCH ---------- */
+  .scene-wake #rUpperArm { animation: stretchArmR 2s ease-in-out infinite; }
+  .scene-wake #lUpperArm { animation: stretchArmL 2s ease-in-out infinite; }
+  .scene-wake #torsoGroup { animation: stretchBody 2s ease-in-out infinite; transform-origin: 100px 150px; }
+  @keyframes stretchArmR {
+    0%, 100% { transform: rotate(15deg); }
+    50% { transform: rotate(170deg); }
+  }
+  @keyframes stretchArmL {
+    0%, 100% { transform: rotate(-15deg); }
+    50% { transform: rotate(-170deg); }
+  }
+  @keyframes stretchBody {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+
+  /* ---------- SCENE: WALK ---------- */
+  .scene-walk #rUpperLeg { animation: walkLegR 0.8s ease-in-out infinite; }
+  .scene-walk #lUpperLeg { animation: walkLegL 0.8s ease-in-out infinite; }
+  .scene-walk #rUpperArm { animation: walkArmR 0.8s ease-in-out infinite; }
+  .scene-walk #lUpperArm { animation: walkArmL 0.8s ease-in-out infinite; }
+  .scene-walk #stickman { animation: bob 0.4s ease-in-out infinite; }
+  @keyframes walkLegR {
+    0%, 100% { transform: rotate(30deg); }
+    50% { transform: rotate(-30deg); }
+  }
+  @keyframes walkLegL {
+    0%, 100% { transform: rotate(-30deg); }
+    50% { transform: rotate(30deg); }
+  }
+  @keyframes walkArmR {
+    0%, 100% { transform: rotate(-25deg); }
+    50% { transform: rotate(25deg); }
+  }
+  @keyframes walkArmL {
+    0%, 100% { transform: rotate(25deg); }
+    50% { transform: rotate(-25deg); }
+  }
+  @keyframes bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+  }
+
+  /* ---------- SCENE: SIT AT DESK (typing) ---------- */
+  .scene-desk #torsoGroup { transform: translateY(40px) rotate(5deg); transform-origin: 100px 150px; }
+  .scene-desk #lUpperLeg { transform: rotate(-75deg); }
+  .scene-desk #rUpperLeg { transform: rotate(75deg); }
+  .scene-desk #lLowerLeg { transform: rotate(70deg); }
+  .scene-desk #rLowerLeg { transform: rotate(-70deg); }
+  .scene-desk #rUpperArm { transform: rotate(70deg); }
+  .scene-desk #lUpperArm { transform: rotate(-70deg); }
+  .scene-desk #rLowerArm { animation: typeR 0.5s ease-in-out infinite; }
+  .scene-desk #lLowerArm { animation: typeL 0.5s ease-in-out infinite; }
+  @keyframes typeR {
+    0%, 100% { transform: rotate(30deg); }
+    50% { transform: rotate(45deg); }
+  }
+  @keyframes typeL {
+    0%, 100% { transform: rotate(-30deg); }
+    50% { transform: rotate(-45deg); }
+  }
+
+  /* ---------- SCENE: EAT ---------- */
+  .scene-eat #rUpperArm { animation: eatArm 1.4s ease-in-out infinite; }
+  .scene-eat #rLowerArm { animation: eatForearm 1.4s ease-in-out infinite; }
+  .scene-eat #lUpperArm { transform: rotate(-40deg); }
+  .scene-eat #lUpperLeg { transform: rotate(-75deg); }
+  .scene-eat #rUpperLeg { transform: rotate(75deg); }
+  .scene-eat #lLowerLeg { transform: rotate(70deg); }
+  .scene-eat #rLowerLeg { transform: rotate(-70deg); }
+  @keyframes eatArm {
+    0%, 60%, 100% { transform: rotate(60deg); }
+    30% { transform: rotate(130deg); }
+  }
+  @keyframes eatForearm {
+    0%, 60%, 100% { transform: rotate(10deg); }
+    30% { transform: rotate(90deg); }
+  }
+
+  /* ---------- SCENE: SLEEP ---------- */
+  .scene-sleep #stickman {
+    transform: rotate(90deg) translate(0, 0);
+    transform-origin: 100px 150px;
+    transition: transform 0.6s;
+  }
+  #zzz {
+    opacity: 0;
+    font-size: 24px;
+    font-weight: bold;
+    fill: #555;
+  }
+  .scene-sleep #zzz { animation: floatZ 2s ease-in-out infinite; }
+  @keyframes floatZ {
+    0% { transform: translate(0,0); opacity: 0.3; }
+    50% { transform: translate(10px,-15px); opacity: 1; }
+    100% { transform: translate(20px,-30px); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage" class="scene-wake">
+  <svg viewBox="0 0 200 260">
+    <g id="stickman">
+      <g id="torsoGroup">
+        <circle class="head" cx="100" cy="60" r="18"/>
+        <line class="torso" x1="100" y1="78" x2="100" y2="150"/>
+
+        <g id="rUpperArm">
+          <line class="limb" x1="100" y1="95" x2="100" y2="135"/>
+          <g id="rLowerArm">
+            <line class="limb" x1="100" y1="135" x2="100" y2="170"/>
+          </g>
+        </g>
+
+        <g id="lUpperArm">
+          <line class="limb" x1="100" y1="95" x2="100" y2="135"/>
+          <g id="lLowerArm">
+            <line class="limb" x1="100" y1="135" x2="100" y2="170"/>
+          </g>
+        </g>
+      </g>
+
+      <g id="rUpperLeg">
+        <line class="limb" x1="100" y1="150" x2="100" y2="200"/>
+        <g id="rLowerLeg">
+          <line class="limb" x1="100" y1="200" x2="100" y2="245"/>
+        </g>
+      </g>
+
+      <g id="lUpperLeg">
+        <line class="limb" x1="100" y1="150" x2="100" y2="200"/>
+        <g id="lLowerLeg">
+          <line class="limb" x1="100" y1="200" x2="100" y2="245"/>
+        </g>
+      </g>
+    </g>
+
+    <text id="zzz" x="125" y="60">Z z z</text>
+  </svg>
+</div>
+
+<div id="label">Waking up &amp; stretching</div>
+
+<div id="controls">
+  <button data-scene="wake">Wake Up</button>
+  <button data-scene="walk">Walk</button>
+  <button data-scene="desk">Desk</button>
+  <button data-scene="eat">Eat</button>
+  <button data-scene="sleep">Sleep</button>
+</div>
+
+<script>
+  const stage = document.getElementById('stage');
+  const label = document.getElementById('label');
+  const scenes = ['wake', 'walk', 'desk', 'eat', 'sleep'];
+  const labels = {
+    wake: 'Waking up & stretching',
+    walk: 'Walking',
+    desk: 'Working at desk',
+    eat: 'Eating',
+    sleep: 'Sleeping'
+  };
+  let i = 0;
+
+  function setScene(name) {
+    stage.className = 'scene-' + name;
+    label.textContent = labels[name];
+  }
+
+  document.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setScene(btn.dataset.scene);
+      i = scenes.indexOf(btn.dataset.scene);
+      resetAutoplay();
+    });
+  });
+
+  let timer;
+  function resetAutoplay() {
+    clearInterval(timer);
+    timer = setInterval(() => {
+      i = (i + 1) % scenes.length;
+      setScene(scenes[i]);
+    }, 4000);
+  }
+  resetAutoplay();
+</script>
+
+</body>
+</html>
