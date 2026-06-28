@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>A Day in the Life — Premium Edition</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  #frame {
+    position: relative;
+    width: 800px;
+    height: 450px;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+  }
+
+  /* ---------------- BACKGROUND LAYERS (crossfade + parallax) ---------------- */
+  .bg-layer {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 1s ease;
+  }
+  .bg-layer.active { opacity: 1; }
+
+  .sky { position: absolute; inset: 0; }
+  .parallax-far { transform: translateZ(0); animation: driftFar 30s linear infinite; }
+  .parallax-near { animation: driftNear 14s linear infinite; }
+  @keyframes driftFar { from { transform: translateX(0); } to { transform: translateX(-60px); } }
+  @keyframes driftNear { from { transform: translateX(0); } to { transform: translateX(-160px); } }
+
+  /* ---------------- CHARACTER ---------------- */
+  #character {
+    position: absolute;
+    left: 50%;
+    bottom: 60px;
+    width: 220px;
+    height: 320px;
+    transform: translateX(-50%);
+    filter: drop-shadow(0 14px 18px rgba(0,0,0,0.35));
+  }
+  #character svg { width: 100%; height: 100%; }
+
+  .limb { stroke-linecap: round; fill: none; }
+  .armSkin { stroke: #e6a868; stroke-width: 16; }
+  .legPant { stroke: #2d3046; stroke-width: 18; }
+  .torsoShirt { stroke: #3a9bc7; stroke-width: 30; stroke-linecap: round; }
+  .headFill { fill: url(#skinGrad); }
+  .faceFeature { stroke: #2b2b2b; stroke-width: 2.5; stroke-linecap: round; fill: none; }
+  .hair { fill: #2b1b12; }
+
+  #rUpperArm, #lUpperArm { transform-origin: 110px 92px; }
+  #rUpperLeg, #lUpperLeg { transform-origin: 110px 165px; }
+  #rLowerArm { transform-origin: 110px 138px; }
+  #lLowerArm { transform-origin: 110px 138px; }
+  #rLowerLeg { transform-origin: 110px 225px; }
+  #lLowerLeg { transform-origin: 110px 225px; }
+  #rUpperArm, #lUpperArm, #rUpperLeg, #lUpperLeg,
+  #rLowerArm, #lLowerArm, #rLowerLeg, #lLowerLeg { transform: rotate(0deg); transition: transform 0.5s ease; }
+
+  /* ---------------- LOWER THIRD CAPTION ---------------- */
+  #lowerThird {
+    position: absolute;
+    left: 36px;
+    bottom: 34px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transform: translateX(-30px);
+    opacity: 0;
+    transition: transform 0.5s cubic-bezier(.2,.8,.2,1), opacity 0.5s ease;
+  }
+  #lowerThird.show { transform: translateX(0); opacity: 1; }
+  #lowerThird .bar { width: 6px; height: 36px; background: linear-gradient(180deg,#ffd66b,#ff9f43); border-radius: 3px; }
+  #lowerThird .text {
+    background: rgba(15,15,20,0.55);
+    backdrop-filter: blur(6px);
+    padding: 8px 18px;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+
+  /* ---------------- VIGNETTE / GRAIN POLISH ---------------- */
+  #vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.35) 100%);
+    pointer-events: none;
+  }
+  #lightSweep {
+    position: absolute; inset: 0;
+    background: linear-gradient(120deg, transparent 40%, rgba(255,255,255,0.07) 50%, transparent 60%);
+    transform: translateX(-100%);
+    animation: sweep 6s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes sweep { 0% { transform: translateX(-120%); } 50% { transform: translateX(120%); } 100% { transform: translateX(120%); } }
+
+  /* ---------------- CONTROLS ---------------- */
+  #controls { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 20px;
+    background: #1c1c22;
+    color: #eee;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    transition: background 0.2s, transform 0.15s;
+  }
+  button:hover { background: #34343f; transform: translateY(-1px); }
+  button.active { background: linear-gradient(135deg,#ff9f43,#ffd66b); color: #1c1c22; }
+
+  /* =================== SCENE-SPECIFIC POSES =================== */
+  .pose-wake #rUpperArm { animation: stretchArmR 2.2s ease-in-out infinite; }
+  .pose-wake #lUpperArm { animation: stretchArmL 2.2s ease-in-out infinite; }
+  #character.pose-wake { animation: floatY 2.2s ease-in-out infinite; }
+  @keyframes stretchArmR { 0%,100% { transform: rotate(15deg); } 50% { transform: rotate(175deg); } }
+  @keyframes stretchArmL { 0%,100% { transform: rotate(-15deg); } 50% { transform: rotate(-175deg); } }
+  @keyframes floatY { 0%,100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-10px); } }
+
+  .pose-shower #rUpperArm { animation: scrubArmR 0.9s ease-in-out infinite; }
+  .pose-shower #rLowerArm { animation: scrubForearmR 0.9s ease-in-out infinite; }
+  .pose-shower #lUpperArm { transform: rotate(-20deg); }
+  .pose-shower #lLowerArm { transform: rotate(-10deg); }
+  @keyframes scrubArmR { 0%,100% { transform: rotate(40deg); } 50% { transform: rotate(75deg); } }
+  @keyframes scrubForearmR { 0%,100% { transform: rotate(-60deg); } 50% { transform: rotate(-95deg); } }
+  .drop { opacity: 0; stroke: #8fd3ff; stroke-width: 3; stroke-linecap: round; animation: fall 0.9s linear infinite; }
+  .drop:nth-child(2) { animation-delay: .25s; }
+  .drop:nth-child(3) { animation-delay: .5s; }
+  @keyframes fall { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(46px); opacity: 0; } }
+
+  .pose-brush #rUpperArm { transform: rotate(112deg); }
+  .pose-brush #rLowerArm { animation: brushForearm 0.4s ease-in-out infinite; }
+  .pose-brush #lUpperArm { transform: rotate(-15deg); }
+  .pose-brush #headGroup { animation: brushHead 0.4s ease-in-out infinite; }
+  @keyframes brushForearm { 0%,100% { transform: rotate(-95deg); } 50% { transform: rotate(-78deg); } }
+  @keyframes brushHead { 0%,100% { transform: translateX(0); } 50% { transform: translateX(2px); } }
+
+  .pose-walk #rUpperLeg { animation: walkLegR 0.8s ease-in-out infinite; }
+  .pose-walk #lUpperLeg { animation: walkLegL 0.8s ease-in-out infinite; }
+  .pose-walk #rUpperArm { animation: walkArmR 0.8s ease-in-out infinite; }
+  .pose-walk #lUpperArm { animation: walkArmL 0.8s ease-in-out infinite; }
+  #character.pose-walk { animation: bob 0.4s ease-in-out infinite; }
+  @keyframes walkLegR { 0%,100% { transform: rotate(30deg); } 50% { transform: rotate(-30deg); } }
+  @keyframes walkLegL { 0%,100% { transform: rotate(-30deg); } 50% { transform: rotate(30deg); } }
+  @keyframes walkArmR { 0%,100% { transform: rotate(-25deg); } 50% { transform: rotate(25deg); } }
+  @keyframes walkArmL { 0%,100% { transform: rotate(25deg); } 50% { transform: rotate(-25deg); } }
+  @keyframes bob { 0%,100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-5px); } }
+
+  .pose-drive #torsoGroup { transform: translateY(40px); transform-origin: 110px 165px; }
+  .pose-drive #lUpperLeg { transform: rotate(-75deg); }
+  .pose-drive #rUpperLeg { transform: rotate(75deg); }
+  .pose-drive #lLowerLeg { transform: rotate(70deg); }
+  .pose-drive #rLowerLeg { transform: rotate(-70deg); }
+  .pose-drive #rUpperArm { transform: rotate(75deg); }
+  .pose-drive #lUpperArm { transform: rotate(-75deg); }
+  .pose-drive #rLowerArm { animation: steerR 1.6s ease-in-out infinite; }
+  .pose-drive #lLowerArm { animation: steerL 1.6s ease-in-out infinite; }
+  @keyframes steerR { 0%,100% { transform: rotate(20deg); } 50% { transform: rotate(-10deg); } }
+  @keyframes steerL { 0%,100% { transform: rotate(-20deg); } 50% { transform: rotate(10deg); } }
+
+  .pose-desk #torsoGroup { transform: translateY(40px) rotate(5deg); transform-origin: 110px 165px; }
+  .pose-desk #lUpperLeg { transform: rotate(-75deg); }
+  .pose-desk #rUpperLeg { transform: rotate(75deg); }
+  .pose-desk #lLowerLeg { transform: rotate(70deg); }
+  .pose-desk #rLowerLeg { transform: rotate(-70deg); }
+  .pose-desk #rUpperArm { transform: rotate(70deg); }
+  .pose-desk #lUpperArm { transform: rotate(-70deg); }
+  .pose-desk #rLowerArm { animation: typeR 0.5s ease-in-out infinite; }
+  .pose-desk #lLowerArm { animation: typeL 0.5s ease-in-out infinite; }
+  @keyframes typeR { 0%,100% { transform: rotate(30deg); } 50% { transform: rotate(45deg); } }
+  @keyframes typeL { 0%,100% { transform: rotate(-30deg); } 50% { transform: rotate(-45deg); } }
+
+  .pose-eat #rUpperArm { animation: eatArm 1.4s ease-in-out infinite; }
+  .pose-eat #rLowerArm { animation: eatForearm 1.4s ease-in-out infinite; }
+  .pose-eat #lUpperArm { transform: rotate(-40deg); }
+  .pose-eat #lUpperLeg { transform: rotate(-75deg); }
+  .pose-eat #rUpperLeg { transform: rotate(75deg); }
+  .pose-eat #lLowerLeg { transform: rotate(70deg); }
+  .pose-eat #rLowerLeg { transform: rotate(-70deg); }
+  @keyframes eatArm { 0%,60%,100% { transform: rotate(60deg); } 30% { transform: rotate(130deg); } }
+  @keyframes eatForearm { 0%,60%,100% { transform: rotate(10deg); } 30% { transform: rotate(90deg); } }
+
+  #character.pose-sleep {
+    transform: translateX(-50%) rotate(90deg) translate(0, 75px);
+    transition: transform 0.8s ease;
+  }
+  .zzz { opacity: 0; font-size: 22px; font-weight: 700; fill: #cfe9ff; }
+  .pose-sleep .zzz { animation: floatZ 2.4s ease-in-out infinite; }
+  @keyframes floatZ { 0% { transform: translate(0,0); opacity: .2; } 50% { transform: translate(10px,-16px); opacity: 1; } 100% { transform: translate(20px,-32px); opacity: 0; } }
+</style>
+</head>
+<body>
+
+<div id="frame">
+
+  <!-- ============== BACKGROUNDS ============== -->
+  <div class="bg-layer active" id="bg-wake">
+    <svg class="sky" viewBox="0 0 800 450" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="skyWake" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffd9a0"/>
+          <stop offset="60%" stop-color="#ffb677"/>
+          <stop offset="100%" stop-color="#c97b5a"/>
+        </linearGradient>
+      </defs>
+      <rect width="800" height="450" fill="url(#skyWake)"/>
+      <circle cx="650" cy="120" r="70" fill="#fff3cf" opacity="0.9"/>
+      <rect x="0" y="330" width="800" height="120" fill="#5b3a2e" opacity="0.6"/>
+      <rect x="60" y="250" width="220" height="100" rx="10" fill="#7a5848" opacity="0.5"/>
+    </svg>
+  </div>
+
+  <div class="bg-layer" id="bg-shower">
+    <svg class="sky" viewBox="0 0 800 450" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="skyShower" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#bfe9ff"/>
+          <stop offset="100%" stop-color="#8fd3ff"/>
+        </linearGradient>
+      </defs>
+      <rect width="800" height="450" fill="url(#skyShower)"/>
+      <g opacity="0.35" stroke="#ffffff" stroke-width="2">
+        <line x1="40" y1="0" x2="40" y2="450"/><line x1="120" y1="0" x2="120" y2="450"/>
+        <line x1="200" y1="0" x2="200" y2="450"/><line x1="280" y1="0" x2="280" y2="450"/>
+        <line x1="600" y1="0" x2="600" y2="450"/><line x1="680" y1="0" x2="680" y2="450"/><line x1="760" y1="0" x2="760" y2="450"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="bg-layer" id="bg-brush">
+    <svg class="sky" viewBox="0 0 800 450" preserveAspectRatio="none">
+      <rect width="800" height="450" fill="#dff4f1"/>
+      <rect x="0" y="320" width="800" height="20" fill="#bfe3dd"/>
+      <circle cx="110" cy="120" r="55" fill="#fff" stroke="#cfe9e5" stroke-width="4"/>
+    </svg>
+  </div>
+
+  <div class="bg-layer" id="bg-walk">
+    <svg class="sky parallax-far" viewBox="0 0 1000 450" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="skyWalk" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#8ec7ff"/>
+          <stop offset="100%" stop-color="#dff1ff"/>
+        </linearGradient>
+      </defs>
+      <rect width="1000" height="450" fill="url(#skyWalk)"/>
+      <g fill="#ffffff" opacity="0.8">
+        <ellipse cx="150" cy="80" rx="50" ry="18"/>
+        <ellipse cx="500" cy="60" rx="60" ry="20"/>
+        <ellipse cx="850" cy="90" rx="55" ry="18"/>
+      </g>
+      <g fill="#9fb6c9">
+        <rect x="0" y="260" width="120" height="160"/>
+        <rect x="140" y="220" width="90" height="200"/>
+        <rect x="260" y="250" width="100" height="170"/>
+        <rect x="700" y="230" width="100" height="190"/>
+        <rect x="820" y="260" width="120" height="160"/>
+      </g>
+    </svg>
+    <svg class="sky parallax-near" viewBox="0 0 1000 450" preserveAspectRatio="none" style="position:absolute;inset:0;">
+      <rect y="400" width="1000" height="50" fill="#5d6b73"/>
+      <g stroke="#dfe6ea" stroke-width="4">
+        <line x1="40" y1="425" x2="80" y2="425"/><line x1="160" y1="425" x2="200" y2="425"/>
+        <line x1="280" y1="425" x2="320" y2="425"/><line x1="400" y1="425" x2="440" y2="425"/>
+        <line x1="520" y1="425" x2="560" y2="425"/><line x1="640" y1="425" x2="680" y2="425"/>
+        <line x1="760" y1="425" x2="800" y2="425"/><line x1="880" y1="425" x2="920" y2="425"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="bg-layer" id="bg-drive">
+    <svg class="sky" viewBox="0 0 800 450" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="skyDrive" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#5b6b78"/>
+          <stop offset="100%" stop-color="#9aa9b3"/>
+        </linearGradient>
+      </defs>
+      <rect width="800" height="450" fill="url(#skyDrive)"/>
+      <rect x="0" y="350" width="800" height="100" fill="#3c3c40"/>
+      <g class="parallax-near" stroke="#f2d24b" stroke-width="6">
+        <line x1="-50" y1="400" x2="0" y2="400"/><line x1="100" y1="400" x2="150" y2="400"/>
+        <line x1="300" y1="400" x2="350" y2="400"/><line x1="500" y1="400" x2="550" y2="400"/>
+        <line x1="700" y1="400" x2="750" y2="400"/>
+      </g>
+      <rect x="20" y="60" width="760" height="40" rx="8" fill="#2b2b30" opacity="0.7"/>
+    </svg>
+  </div>
+
+  <div class="bg-layer" id="bg-desk">
+    <svg class="sky" viewBox="0 0 800 450" preserveAspectRatio="none">
+      <rect width="800" height="450" fill="#efe6da"/>
+      <rect x="0" y="330" width="800" height="120" fill="#c8a878"/>
+      <rect x="250" y="180" width="300" height="160" rx="6" fill="#2b2b32"/>
+      <rect x="270" y="200" width="260" height="120" fill="#4ea8de" opacity="0.85"/>
+    </svg>
+  </div>
+
+  <div class="bg-layer" id="bg-eat">
+    <svg class="sky" viewBox="0 0 800 450" preserveAspectRatio="none">
+      <rect width="800" height="450" fill="#fff2e0"/>
+      <rect x="0" y="340" width="800" height="110" fill="#caa06a"/>
+      <ellipse cx="400" cy="350" rx="120" ry="20" fill="#ffffff" opacity="0.9"/>
+    </svg>
+  </div>
+
+  <div class="bg-layer" id="bg-sleep">
+    <svg class="sky" viewBox="0 0 800 450" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="skySleep" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#0b1840"/>
+          <stop offset="100%" stop-color="#1c2c5e"/>
+        </linearGradient>
+      </defs>
+      <rect width="800" height="450" fill="url(#skySleep)"/>
+      <circle cx="650" cy="90" r="40" fill="#f4f1d8" opacity="0.9"/>
+      <g fill="#fff" opacity="0.8">
+        <circle cx="100" cy="60" r="2"/><circle cx="180" cy="100" r="2"/><circle cx="260" cy="50" r="2"/>
+        <circle cx="340" cy="120" r="2"/><circle cx="420" cy="70" r="2"/><circle cx="500" cy="40" r="2"/>
+        <circle cx="60" cy="150" r="2"/><circle cx="230" cy="160" r="2"/>
+      </g>
+      <rect x="0" y="350" width="800" height="100" fill="#101a3a"/>
+    </svg>
+  </div>
+
+  <div id="vignette"></div>
+  <div id="lightSweep"></div>
+
+  <!-- ============== CHARACTER ============== -->
+  <div id="character" class="pose-wake">
+    <svg viewBox="0 0 220 320">
+      <defs>
+        <linearGradient id="skinGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#ffcf9e"/>
+          <stop offset="100%" stop-color="#e6a868"/>
+        </linearGradient>
+        <linearGradient id="shirtGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#4fb8e0"/>
+          <stop offset="100%" stop-color="#2d7fa8"/>
+        </linearGradient>
+        <linearGradient id="pantGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#3b3f54"/>
+          <stop offset="100%" stop-color="#23263a"/>
+        </linearGradient>
+      </defs>
+
+      <g id="torsoGroup">
+        <g id="headGroup">
+          <circle class="headFill" cx="110" cy="55" r="26"/>
+          <path class="hair" d="M84,46 a26,26 0 0 1 52,0 q-4,-14 -26,-14 t-26,14 z"/>
+          <line class="faceFeature" x1="100" y1="58" x2="103" y2="58"/>
+          <line class="faceFeature" x1="117" y1="58" x2="120" y2="58"/>
+          <path class="faceFeature" d="M101,68 q9,7 18,0"/>
+        </g>
+        <line class="torsoShirt" x1="110" y1="82" x2="110" y2="165"/>
+
+        <g id="rUpperArm">
+          <line class="limb armSkin" x1="110" y1="92" x2="110" y2="138"/>
+          <g id="rLowerArm">
+            <line class="limb armSkin" x1="110" y1="138" x2="110" y2="178"/>
+          </g>
+        </g>
+        <g id="lUpperArm">
+          <line class="limb armSkin" x1="110" y1="92" x2="110" y2="138"/>
+          <g id="lLowerArm">
+            <line class="limb armSkin" x1="110" y1="138" x2="110" y2="178"/>
+          </g>
+        </g>
+      </g>
+
+      <g id="rUpperLeg">
+        <line class="limb legPant" x1="110" y1="165" x2="110" y2="225"/>
+        <g id="rLowerLeg">
+          <line class="limb legPant" x1="110" y1="225" x2="110" y2="280"/>
+        </g>
+      </g>
+      <g id="lUpperLeg">
+        <line class="limb legPant" x1="110" y1="165" x2="110" y2="225"/>
+        <g id="lLowerLeg">
+          <line class="limb legPant" x1="110" y1="225" x2="110" y2="280"/>
+        </g>
+      </g>
+
+      <text class="zzz" x="135" y="55">Z z z</text>
+      <line class="drop" x1="60" y1="10" x2="60" y2="22"/>
+      <line class="drop" x1="80" y1="4" x2="80" y2="16"/>
+      <line class="drop" x1="150" y1="8" x2="150" y2="20"/>
+    </svg>
+  </div>
+
+  <div id="lowerThird" class="show">
+    <div class="bar"></div>
+    <div class="text" id="lowerThirdText">Waking up &amp; stretching</div>
+  </div>
+</div>
+
+<div id="controls"></div>
+
+<script>
+  const scenes = ['wake', 'shower', 'brush', 'walk', 'drive', 'desk', 'eat', 'sleep'];
+  const labels = {
+    wake: 'Waking up & stretching',
+    shower: 'Taking a shower',
+    brush: 'Brushing teeth',
+    walk: 'Walking to work',
+    drive: 'Driving',
+    desk: 'Working at the desk',
+    eat: 'Eating dinner',
+    sleep: 'Drifting off to sleep'
+  };
+
+  const character = document.getElementById('character');
+  const lowerThird = document.getElementById('lowerThird');
+  const lowerThirdText = document.getElementById('lowerThirdText');
+  const controls = document.getElementById('controls');
+
+  scenes.forEach(s => {
+    const btn = document.createElement('button');
+    btn.textContent = labels[s].split(' ')[0] === 'Waking' ? 'Wake Up' : labels[s];
+    btn.dataset.scene = s;
+    btn.addEventListener('click', () => { setScene(s); resetAutoplay(); });
+    controls.appendChild(btn);
+  });
+
+  let i = 0;
+  function setScene(name) {
+    document.querySelectorAll('.bg-layer').forEach(el => el.classList.remove('active'));
+    document.getElementById('bg-' + name).classList.add('active');
+
+    character.className = 'pose-' + name;
+
+    lowerThird.classList.remove('show');
+    setTimeout(() => {
+      lowerThirdText.textContent = labels[name];
+      lowerThird.classList.add('show');
+    }, 250);
+
+    document.querySelectorAll('#controls button').forEach(b => {
+      b.classList.toggle('active', b.dataset.scene === name);
+    });
+    i = scenes.indexOf(name);
+  }
+
+  let timer;
+  function resetAutoplay() {
+    clearInterval(timer);
+    timer = setInterval(() => {
+      i = (i + 1) % scenes.length;
+      setScene(scenes[i]);
+    }, 4500);
+  }
+
+  setScene('wake');
+  resetAutoplay();
+</script>
+
+</body>
+</html>
