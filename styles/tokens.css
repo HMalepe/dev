@@ -1,0 +1,139 @@
+/*
+ * GLOBAL DESIGN TOKENS — single source of truth.
+ * Every hero concept module references these by name; never redefine them locally.
+ */
+
+:root {
+  /* ---------------------------------------------------------------- color */
+  --ink-black: #0b0b0c;      /* primary background — near-black, warm undertone, not pure #000 */
+  --warm-bone: #f5f1ea;      /* primary text on dark backgrounds */
+  --barber-gold: #b8945f;    /* accent / CTA / interactive highlight */
+  --blade-steel: #c7cdd1;    /* metal specular highlight reference */
+  --signal-red: #c0392b;     /* barber-pole red — accent only, never a base color */
+  --deep-navy: #10131c;      /* secondary background / gradient stop for section transitions */
+  --success-green: #4a7c59;  /* confirmation states only, e.g. booking success */
+
+  /* ----------------------------------------------------------------- type */
+  --font-display: 'Right Grotesk', 'Neue Haas Grotesk', 'Helvetica Neue', sans-serif;
+  --font-mono: "Suisse Int'l Mono", 'IBM Plex Mono', monospace;
+  --font-body: "Suisse Int'l", 'Inter', system-ui, sans-serif;
+
+  --text-display-size: clamp(3rem, 9vw, 8.75rem); /* 48px floor, 140px ceiling */
+  --text-display-weight: 600;
+  --text-display-leading: 0.9;
+  --text-display-tracking: -0.02em;
+
+  --text-kicker-size: 12px;
+  --text-kicker-weight: 500;
+  --text-kicker-tracking: 0.24em;
+
+  --text-subhead-size: clamp(1rem, 1.4vw, 1.25rem); /* 16px–20px */
+  --text-subhead-leading: 1.5;
+  --text-subhead-measure: 32ch;
+  --text-subhead-color: rgba(245, 241, 234, 0.64);
+
+  --text-ui-size: 13px;
+  --text-ui-weight: 600;
+  --text-ui-tracking: 0.08em;
+
+  /* --------------------------------------------------------- spacing/grid */
+  --space-unit: 8px;
+  --container-max: 1440px;
+
+  /* desktop defaults; overridden per breakpoint below */
+  --grid-columns: 12;
+  --grid-gutter: 32px;
+  --grid-margin: 80px;
+
+  --hero-baseline: 62vh; /* hero content baseline */
+
+  /* --------------------------------------------------------------- easing */
+  --ease-premium-out: cubic-bezier(0.16, 1, 0.3, 1);  /* one-shot entrance reveals */
+  /* ease-scroll-scrub: intentionally absent — scrubbed tweens take their easing
+     from scrollbar position (GSAP scrub:true); never layer CSS/GSAP easing on top */
+  --ease-soft-inout: cubic-bezier(0.45, 0, 0.55, 1);   /* ambient looping/breathing motion */
+  --ease-impact: cubic-bezier(0.34, 1.56, 0.64, 1);    /* stamp/impact/collision punches */
+  /* ease-snap (back.out(1.7)) is GSAP-only — see lib/tokens.ts */
+}
+
+/* Tablet: 768–1023px */
+@media (min-width: 768px) and (max-width: 1023px) {
+  :root {
+    --grid-columns: 8;
+    --grid-gutter: 24px;
+    --grid-margin: 48px;
+  }
+}
+
+/* Mobile: <768px */
+@media (max-width: 767px) {
+  :root {
+    --grid-columns: 4;
+    --grid-gutter: 16px;
+    --grid-margin: 20px;
+    --hero-baseline: 58vh; /* thumb-reach zone */
+  }
+}
+
+/* ------------------------------------------------------------ type classes */
+.type-display {
+  font-family: var(--font-display);
+  font-weight: var(--text-display-weight);
+  font-size: var(--text-display-size);
+  line-height: var(--text-display-leading);
+  letter-spacing: var(--text-display-tracking);
+  color: var(--warm-bone);
+}
+
+.type-kicker {
+  font-family: var(--font-mono);
+  font-weight: var(--text-kicker-weight);
+  font-size: var(--text-kicker-size);
+  letter-spacing: var(--text-kicker-tracking);
+  text-transform: uppercase;
+  color: var(--barber-gold);
+}
+
+.type-subhead {
+  font-family: var(--font-body);
+  font-size: var(--text-subhead-size);
+  line-height: var(--text-subhead-leading);
+  max-width: var(--text-subhead-measure);
+  color: var(--text-subhead-color);
+}
+
+.type-ui {
+  font-family: var(--font-body);
+  font-weight: var(--text-ui-weight);
+  font-size: var(--text-ui-size);
+  letter-spacing: var(--text-ui-tracking);
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------- accessibility contract */
+/* Visible focus ring for keyboard navigation, independent of the custom cursor. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--barber-gold);
+  outline-offset: 2px;
+}
+
+/* prefers-reduced-motion: all concept motion collapses to a single 400ms
+   opacity + translateY entrance. Concepts must gate parallax, autoplay 3D
+   rotation, and scroll-jacking behind this query in JS as well (see
+   lib/tokens.ts prefersReducedMotion helper). */
+@media (prefers-reduced-motion: reduce) {
+  .motion-entrance {
+    animation: reduced-entrance 400ms var(--ease-premium-out) both;
+  }
+}
+
+@keyframes reduced-entrance {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
