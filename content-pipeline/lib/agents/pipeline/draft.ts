@@ -1,4 +1,5 @@
 import { anthropic, MODELS } from "@/lib/anthropic";
+import { getRecentRejectionsContext } from "@/lib/getRecentRejections";
 import { logAgentCall } from "@/lib/logAgentCall";
 import { RUBRIC_TEXT } from "@/lib/rubric";
 import { createServiceRoleClient } from "@/lib/supabase/server";
@@ -31,12 +32,41 @@ export async function runDraftAgent(contentItemId: string, brief: ResearchBrief)
   const model = MODELS.SONNET;
   const userMessage = JSON.stringify(brief, null, 2);
 
+  // Phase 4, section 4: rolling "avoid these patterns" context, cached
+  // separately from the (even-more-static) rubric/instructions block below
+  // since it changes daily-ish rather than "almost never". Note this is
+  // wired in lib/agents/pipeline/draft.ts rather than the literal
+  // app/api/agents/draft/route.ts path the brief names -- in this codebase
+  // the route is a thin wrapper (see that file's own comment) and all
+  // actual prompt construction already lived here from Phase 2 onward.
+  const rejectionsContext = await getRecentRejectionsContext();
+
+  // Deviation from the brief's exact two-block sample (which caches
+  // RUBRIC_TEXT alone as its own block): DRAFT_SYSTEM_PROMPT already
+  // embeds RUBRIC_TEXT inline as one static compile-time string, and it
+  // never changes independently of the rest of the prompt around it, so
+  // caching it as a single block is functionally identical to caching
+  // RUBRIC_TEXT separately -- Anthropic's cache breakpoints cache
+  // everything up to that point as one unit either way. Splitting it back
+  // out into prefix/RUBRIC_TEXT/suffix fragments would add complexity with
+  // no caching benefit.
+  const systemPrompt: Array<{
+    type: "text";
+    text: string;
+    cache_control?: { type: "ephemeral" };
+  }> = [
+    { type: "text", text: DRAFT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+    ...(rejectionsContext
+      ? [{ type: "text" as const, text: rejectionsContext, cache_control: { type: "ephemeral" as const } }]
+      : []),
+  ];
+
   let response;
   try {
     response = await anthropic.messages.create({
       model,
       max_tokens: 8192,
-      system: DRAFT_SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
   } catch (error) {
@@ -52,6 +82,14 @@ export async function runDraftAgent(contentItemId: string, brief: ResearchBrief)
     throw error;
   }
 
+  // DoD (section 6): don't just assume cache_control did something --
+  // response.usage.cache_read_input_tokens > 0 is the actual confirmation
+  // that a prior cached block was reused. Surfaced in the success log
+  // below so this is checkable from agent_logs without re-running with a
+  // debugger attached.
+  const cacheReadTokens = response.usage.cache_read_input_tokens ?? 0;
+  const cacheCreationTokens = response.usage.cache_creation_input_tokens ?? 0;
+
   const rawText = extractResponseText(response);
   let parsed: DraftOutput;
   try {
@@ -63,6 +101,8 @@ export async function runDraftAgent(contentItemId: string, brief: ResearchBrief)
       model: response.model,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
+      cacheCreationInputTokens: cacheCreationTokens,
+      cacheReadInputTokens: cacheReadTokens,
       status: "fail",
       outputSummary: `Failed to parse draft agent JSON output: ${(error as Error).message}`,
     });
@@ -86,6 +126,8 @@ export async function runDraftAgent(contentItemId: string, brief: ResearchBrief)
       model: response.model,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
+      cacheCreationInputTokens: cacheCreationTokens,
+      cacheReadInputTokens: cacheReadTokens,
       status: "fail",
       outputSummary: `Draft succeeded but failed to update content_items: ${updateError.message}`,
     });
@@ -98,8 +140,10 @@ export async function runDraftAgent(contentItemId: string, brief: ResearchBrief)
     model: response.model,
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
+    cacheCreationInputTokens: cacheCreationTokens,
+    cacheReadInputTokens: cacheReadTokens,
     status: "success",
-    outputSummary: `Drafted script (${parsed.script_text.length} chars) + platform variants.`,
+    outputSummary: `Drafted script (${parsed.script_text.length} chars) + platform variants. Rejections context: ${rejectionsContext ? "included" : "none (no prior rejections)"}. Cache: ${cacheReadTokens} read / ${cacheCreationTokens} written.`,
   });
 
   // Immediately invoke the QA agent — internal function call. Same

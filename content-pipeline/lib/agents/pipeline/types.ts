@@ -40,6 +40,22 @@ export interface QaOutput {
   failing_axes: QaFailingAxis[];
 }
 
+/** Phase 4 weekly review: Haiku's rejection-reason clustering output. */
+export interface RejectionTheme {
+  theme: string;
+  count: number;
+}
+
+export interface WeeklyReviewSummary {
+  week_start: string;
+  week_end: string;
+  items_processed: number;
+  qa_pass_rate: number;
+  human_approval_rate: number;
+  prior_week_qa_pass_rate: number | null;
+  top_rejection_themes: RejectionTheme[];
+}
+
 /** Thrown when a model response can't be parsed as the expected JSON shape.
  * Carries the raw text so routes can return it for debugging, per the
  * brief's "return a 500 with the raw text for debugging" requirement. */

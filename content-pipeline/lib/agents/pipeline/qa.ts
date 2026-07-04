@@ -99,12 +99,18 @@ export async function runQaAgent(contentItemId: string): Promise<void> {
 
   const stage = parsed.overall_result === "pass" ? "qa_passed" : "qa_rejected";
 
+  // rejected_by = 'qa_agent' whenever this pass fails, so the Phase 4
+  // feedback loop can tell agent misses apart from human taste calls (see
+  // lib/getRecentRejections.ts). Cleared to null on a pass -- if a later
+  // re-run of this same content_item ever passes, rejected_by shouldn't
+  // keep pointing at a stale rejection from a previous draft.
   const { error: updateError } = await supabase
     .from("content_items")
     .update({
       qa_score: parsed.axis_scores,
       qa_result: parsed.overall_result,
       rejection_reason: rejectionReason,
+      rejected_by: parsed.overall_result === "fail" ? "qa_agent" : null,
       stage,
     })
     .eq("id", contentItemId);

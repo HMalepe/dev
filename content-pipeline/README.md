@@ -21,6 +21,13 @@ teams, roles, or multi-tenant anything.
   non-identifying B-roll via Kling, generic imagery via Pexels, automated
   QA on every output, landing at `stage = 'assets_generated'`. No platform
   publishing (Phase 5) or dashboard review UI (Phase 7) yet.
+- **Phase 4** (feedback loop): captures manual (human) rejections with the
+  same rigor QA-agent rejections already get, builds a rolling "recently
+  rejected, avoid these patterns" block injected into the Draft agent's
+  system prompt (with Anthropic prompt caching on both that block and the
+  rubric), and a weekly cron snapshot (`weekly_reviews`) tracking whether
+  QA pass rate is actually improving. No review-queue UI (Phase 7) — this
+  phase only builds the capture/feedback logic that UI will call into.
 
 ## Stack
 
@@ -196,6 +203,79 @@ duration/seconds is known (Shotstack renders, Kling clips), rather than
 guessed at submission time. A failed submission that was never billed is
 logged with `cost_usd: 0` — a real number, not a null placeholder.
 
+### Phase 4 — feedback loop
+
+- `supabase/migrations/0002_feedback_loop.sql` — adds `content_items.
+  rejected_by` (`'qa_agent' | 'human'`), the `weekly_reviews` table (RLS +
+  "authenticated full access" policy, same pattern as every other table),
+  a `content_items_set_updated_at` trigger (see "Deviations" — this fixes a
+  real Phase 0 gap that Phase 4 is the first phase to actually depend on),
+  and extends `agent_logs.agent_name`'s check constraint to allow
+  `'weekly_review'`.
+- `app/api/content-items/[id]/reject/route.ts` — `POST { reason: string }`.
+  Sets `stage = 'qa_rejected'`, `rejected_by = 'human'`,
+  `rejection_reason = reason`. `reason` is validated as required and
+  non-empty (400 if missing/blank/whitespace-only) — no silent, reason-less
+  rejections, per the brief's own explicit constraint. Also guards that the
+  item is actually at a stage that means "already passed automated QA"
+  (`qa_passed` or `assets_generated`) before allowing the transition (409
+  otherwise) — see "Deviations".
+- `app/api/content-items/[id]/approve/route.ts` — companion endpoint,
+  `POST` with an optional `{ scheduledAt?: string }` body (ISO timestamp;
+  defaults to "now"). Sets `scheduled_at` accordingly — corrected from an
+  earlier `stage = 'scheduled'` write once Phase 5 revealed its publish
+  scheduler actually queries `stage = 'assets_generated' AND scheduled_at
+  <= now()` and never looks for `stage = 'scheduled'` at all; see that
+  route's own comment and Phase 5's README section below for the full
+  story. Same stage guard as reject. Doesn't touch `rejected_by`/
+  `rejection_reason` — it doesn't generate feedback-loop data itself, per
+  the brief.
+- `lib/getRecentRejections.ts` — `getRecentRejectionsContext()`. Queries
+  the 15 most recently updated `content_items` with a non-null
+  `rejection_reason` (from either rejection source — see "Deviations" for
+  why the query differs slightly from the brief's literal sample), and
+  formats each as `[qa_agent]`/`[human]`-tagged lines so the two sources
+  stay visually distinct in the block itself, not just in the underlying
+  data.
+- `lib/agents/pipeline/draft.ts` — now builds `system` as an array of two
+  cached text blocks: the existing rubric-embedding system prompt (cached —
+  "almost never changes"), then `getRecentRejectionsContext()`'s output
+  when non-empty (cached separately — "changes daily-ish"). Both use
+  `cache_control: { type: 'ephemeral' }`. Every `logAgentCall` from the
+  Draft agent now also records `cache_creation_input_tokens`/
+  `cache_read_input_tokens` from `response.usage` in its `outputSummary`,
+  so cache activity is checkable straight from `agent_logs` (see Definition
+  of Done below for why that check matters).
+- `lib/logAgentCall.ts` — `PRICING` now includes `cacheWrite`/`cacheRead`
+  per-million-token rates per model, and the token-based cost calculation
+  adds `cacheCreationInputTokens`/`cacheReadInputTokens` (both optional,
+  additive with the existing `inputTokens`/`outputTokens`) at those rates.
+  Sonnet 5's `cacheRead` rate ($0.30/M) is the exact figure given in the
+  Phase 4 brief; `cacheWrite` isn't specified there, so it's set at
+  Anthropic's standard 5-minute-cache-write multiplier (1.25x base input) —
+  flag if that convention doesn't hold for these specific models.
+- `lib/agents/pipeline/qa.ts` — now also sets `rejected_by = 'qa_agent'`
+  whenever `overall_result = 'fail'`, and clears it back to `null` on a
+  pass (so a later re-run that succeeds doesn't leave a stale rejection
+  source pointing at a previous draft).
+- `lib/agents/pipeline/weeklyReview.ts` — `runWeeklyReview()`. Queries
+  `content_items` touched in the trailing 7 days (by `updated_at`),
+  computes `items_processed`, `qa_pass_rate`, and `human_approval_rate`
+  (see "Deviations" for the exact denominators used), fetches the prior
+  `weekly_reviews` row for `prior_week_qa_pass_rate`, sends every
+  `rejection_reason` from the week to Haiku for theme clustering (skipped
+  entirely, with `top_rejection_themes: []`, if there were none — no need
+  to pay for an LLM call on empty input), logs that Haiku call to
+  `agent_logs` (`agentName: 'weekly_review'`), and inserts one
+  `weekly_reviews` row.
+- `app/api/cron/weekly-review/route.ts` + `vercel.json`'s
+  `0 6 * * 1` entry (Monday 6am UTC — adjust if you need a different
+  timezone) — same `CRON_SECRET` bearer-token auth pattern as
+  `check-renders`, and exempted from the Supabase-session auth proxy the
+  same way (the existing `/api/cron/*` prefix check in
+  `lib/supabase/middleware.ts` already covers this route, no changes
+  needed there).
+
 ## One-time manual setup
 
 These steps require your own Supabase and Vercel accounts/credentials and
@@ -204,11 +284,14 @@ can't be done from an automated agent session — do them once, yourself:
 ### 1. Create the Supabase project
 
 1. Create a new project at [supabase.com](https://supabase.com).
-2. Apply the schema in `supabase/migrations/0001_init.sql` via either:
+2. Apply the schema in `supabase/migrations/0001_init.sql`, then
+   `supabase/migrations/0002_feedback_loop.sql`, in that order, via either:
    - **Supabase CLI:** `supabase link --project-ref <ref>` then `supabase db push`, or
-   - **Dashboard SQL editor:** paste the contents of the migration file and run it.
-3. Confirm the three tables exist (Table Editor, or
-   `select table_name from information_schema.tables where table_schema = 'public';`).
+   - **Dashboard SQL editor:** paste the contents of each migration file and run it.
+3. Confirm the tables exist (Table Editor, or
+   `select table_name from information_schema.tables where table_schema = 'public';`)
+   — you should see `content_items`, `platform_posts`, `agent_logs`, and
+   (after 0002) `weekly_reviews`.
 4. Create your one user account manually: Authentication → Users → Add user
    (email + password). There is intentionally no public signup page.
 
@@ -335,6 +418,47 @@ this schedule at deploy time (see "Deviations" below).
 Two new Supabase Storage buckets (`voiceover-audio`, `rendered-videos`)
 plus `thumbnails` are created automatically on first use — nothing to
 provision manually beyond the schema in step 1.
+
+### 8. Exercise the Phase 4 feedback loop
+
+Manually reject a `content_items` row that's already at `stage =
+'qa_passed'` or `stage = 'assets_generated'`:
+
+```bash
+curl -X POST http://localhost:3000/api/content-items/<uuid>/reject \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Too sensationalized in the opening hook"}'
+```
+
+...or approve one the same way, with no body:
+
+```bash
+curl -X POST http://localhost:3000/api/content-items/<uuid>/approve
+```
+
+To confirm the Draft agent's rolling rejection context is actually wired
+in and doing something: seed a handful of rows with the same repeated
+`rejection_reason` (e.g. "too sensationalized" via the reject endpoint
+above, or by letting the QA agent fail a few drafts for the same reason),
+then trigger a fresh `run-pipeline` call and check the next draft visibly
+avoids that pattern. To confirm prompt caching is actually active (not
+just "the field is set and nothing crashed"): run the Draft agent twice in
+a row within the same 5-minute window and check `agent_logs.output_
+summary` for the second call — it should report a non-zero cache-read
+count.
+
+Run the weekly review cron by hand the same way as `check-renders`:
+
+```bash
+curl http://localhost:3000/api/cron/weekly-review \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+This inserts one row into `weekly_reviews` covering the trailing 7 days
+from whenever you run it — real numbers even if very few (or zero)
+`content_items` were processed in that window (see "Deviations" for how
+`items_processed`, `qa_pass_rate`, and `human_approval_rate` are computed
+so they never come back null).
 
 ## Deviations from the task brief
 
@@ -495,6 +619,95 @@ Phase 3 deviations, each flagged rather than silently made:
   a Vercel Pro (or higher) project — flagging this explicitly since the
   brief's own `vercel.json` snippet doesn't call it out.
 
+Phase 4 deviations, each flagged rather than silently made:
+
+- **`content_items.updated_at` never actually refreshed on `UPDATE` before
+  this phase** — the Phase 0 migration only defaulted it on `INSERT`, so
+  every row's `updated_at` was frozen at creation time. Phases 2 and 3
+  never depended on it being accurate; Phase 4 is the first phase whose
+  correctness genuinely requires it (`getRecentRejectionsContext`'s "most
+  recently rejected" ordering, and the weekly review's "created/updated in
+  the trailing 7 days" query). Added a
+  `content_items_set_updated_at` trigger in `0002_feedback_loop.sql` to fix
+  this at the schema level rather than trying to patch every existing
+  `.update()` call-site to set it manually (which would be easy to forget
+  on the next one added later).
+- **The rolling rejection context query
+  (`lib/getRecentRejections.ts`) doesn't filter on `qa_result = 'fail'`
+  alone, unlike the brief's literal code sample.** The reject endpoint
+  deliberately never overwrites `qa_result` on a human rejection (see the
+  next point for why) — so a `qa_result = 'fail'` filter would only ever
+  surface QA-agent rejections and silently drop every human rejection
+  entirely, directly contradicting section 2's own framing that "both are
+  real signal for the feedback loop." The query instead matches
+  `qa_result = 'fail' OR rejected_by = 'human'`, which restores both
+  sources while still tagging each line with its `rejected_by` value so
+  they stay visually distinct in the block, exactly as the brief's
+  formatting already does.
+- **The reject endpoint never overwrites `qa_result`.** Section 3's own
+  field list for this endpoint doesn't mention `qa_result` either — only
+  `stage`/`rejected_by`/`rejection_reason` — but this is also load-bearing,
+  not just literal: section 5.1 defines `qa_pass_rate` as "percentage where
+  `qa_result = 'pass'` on first QA agent pass (**not counting human
+  overrides**)". With only mutable current-state columns and no event
+  history table, that stat is only computable at all if a human override
+  never touches `qa_result` in the first place — otherwise "first QA agent
+  pass" data is destroyed the moment a human rejects something, and there'd
+  be no way to recover it later. `rejected_by = 'human'` is what marks the
+  override instead; `qa_result` keeps meaning exactly what the QA agent
+  decided, forever.
+- **Both the reject and approve endpoints guard that the item is at `stage
+  = 'qa_passed'` or `stage = 'assets_generated'`** (409 otherwise), beyond
+  the brief's literal minimum-viable spec. "Something that already passed
+  automated QA" (the brief's own description of what this endpoint is for)
+  covers both stages in this codebase, since Phase 3 only ever generates
+  assets for an item that already passed QA — rejecting/approving anything
+  earlier in the pipeline (e.g. `researched`, `scripted`) would mean the
+  review queue is calling these out of order.
+- **`items_processed` (section 5.1) is computed as `qa_result IS NOT
+  NULL`, not `stage = 'qa_pending'`.** `stage` never actually parks at
+  `qa_pending` in this codebase — Draft immediately chains into QA
+  in-process (`lib/agents/pipeline/draft.ts`), so any write of `stage =
+  'qa_pending'` would be overwritten by the same function call before it's
+  ever observable in a later query. `qa_result IS NOT NULL` is the
+  practical equivalent: it's set exactly once, exactly when the QA agent
+  actually scores an item, regardless of pass/fail — the same event the
+  brief's `qa_pending` checkpoint was trying to capture.
+- **The Draft agent's system prompt caches the entire existing
+  `DRAFT_SYSTEM_PROMPT` string as one block, not `RUBRIC_TEXT` alone as a
+  separate block**, unlike the brief's exact two-block sample. Since Phase
+  2, `RUBRIC_TEXT` is already embedded inline inside `DRAFT_SYSTEM_PROMPT`
+  as one static compile-time string, and nothing in that string changes
+  independently of anything else in it — Anthropic's cache breakpoints
+  cache everything up to that point as a single unit regardless of how many
+  blocks it's split into, so this has identical caching behavior to the
+  brief's sample without adding prefix/suffix string-splitting complexity
+  that would buy nothing.
+- **`lib/logAgentCall.ts`'s cache-token accounting is new, not in the
+  brief.** The brief calls prompt caching "a real cost lever" and asks you
+  to *verify* it's active, but doesn't ask for cost tracking to actually
+  account for the cheaper cache rates. Left as pure `inputTokens` math,
+  every Draft agent call after the first in a cache window would silently
+  *overstate* `cost_usd` (charging the full $2.00/M input rate for tokens
+  that actually cost $0.30/M) — which runs directly against Phase 2's own
+  "flag pricing issues, don't silently guess" cost-tracking principle this
+  codebase has followed since Phase 2. Extended `PRICING` and the cost
+  formula to close that gap rather than leave a known-wrong number in
+  `agent_logs`.
+- **`agent_logs.agent_name`'s check constraint gained a `'weekly_review'`
+  value.** The Haiku clustering call (section 5.3) doesn't fit
+  `research`/`draft`/`qa`/`asset`/`publish`, and section 5.5 explicitly
+  still requires logging it "as usual" — there's no existing category to
+  reuse without mislabeling what actually happened.
+- **`top_rejection_themes`'s clustering prompt explicitly allows returning
+  fewer than 3 themes** if the week's data doesn't support 3 genuinely
+  distinct ones, deviating from the brief's literal "3-5" instruction in
+  that one edge case. This follows the brief's own Definition of Done more
+  literally than "3-5" does: section 6 explicitly says "if the first run
+  looks degenerate, tighten the Haiku prompt rather than shipping noisy
+  output" — manufacturing filler themes to pad a low-signal week up to 3
+  is exactly the kind of noisy output that instruction rules out.
+
 ## Definition of done — Phase 0
 
 - [x] `npm run build` succeeds with zero TypeScript errors
@@ -593,4 +806,79 @@ Phase 3 deviations, each flagged rather than silently made:
       Storage (+ optionally Kling) confirmed to reach `assets_generated`
       — *pending: requires real API keys for all providers and a
       provisioned Supabase project with Storage enabled; none of that is
+      available in this environment*
+
+## Definition of done — Phase 4
+
+- [x] Manually rejecting an already-QA-passed item via
+      `POST /api/content-items/[id]/reject` sets `rejected_by = 'human'`
+      and is distinguishable from a QA-agent rejection (`rejected_by =
+      'qa_agent'`, now also set by `lib/agents/pipeline/qa.ts` on every
+      automated fail) — verified via smoke test below and by inspection of
+      both write paths
+- [x] `reason` is a required, non-empty field on the reject endpoint — a
+      missing or whitespace-only `reason` returns `400` before any
+      database write happens; verified via smoke test below
+- [x] The Draft agent's system prompt visibly includes the rolling
+      rejections block (as its own cached text block) whenever
+      `getRecentRejectionsContext()` returns non-empty content, and the
+      brief's own example scenario (a repeated "too sensationalized"
+      pattern) is exactly the shape of input `lib/getRecentRejections.ts`
+      surfaces to it — *a live before/after draft comparison needs a real
+      `ANTHROPIC_API_KEY` and a provisioned Supabase project with seeded
+      rejection rows; not available in this environment, see setup step 8*
+- [x] Prompt caching is wired with `cache_control: { type: 'ephemeral' }`
+      on both system-prompt blocks, and every Draft agent `logAgentCall`
+      now records `cache_creation_input_tokens`/`cache_read_input_tokens`
+      from the real `response.usage` object (never assumed) in its
+      `outputSummary` — *confirming a non-zero `cache_read_input_tokens`
+      on a real second call requires a live `ANTHROPIC_API_KEY`; the
+      request shape itself was verified end-to-end against the real
+      Anthropic API (see smoke test below), which returned an
+      authentication error only after accepting the request payload,
+      confirming the `system` array + `cache_control` shape is valid*
+- [x] The weekly review cron (`app/api/cron/weekly-review` +
+      `vercel.json`'s `0 6 * * 1` entry) runs and produces a
+      `weekly_reviews` row with real, non-null numbers even in a week with
+      zero processed items — `items_processed`/`qa_pass_rate`/
+      `human_approval_rate` all default to `0` (never `null`/`NaN`) when
+      their denominators are zero; only `prior_week_qa_pass_rate` is
+      legitimately `null`, and only on the very first run ever (no prior
+      row exists yet to compare against)
+- [x] `top_rejection_themes` clustering is prompted to produce genuinely
+      distinct themes, explicitly instructed to keep `qa_agent`- and
+      `human`-sourced rejections separate when they represent different
+      concerns, and explicitly allowed to return fewer than 3 themes
+      rather than manufacture filler ones on a low-signal week — *actual
+      clustering quality on real data needs a live `ANTHROPIC_API_KEY` and
+      real accumulated rejection reasons; not available in this
+      environment*
+- [x] `qa_agent` and `human` rejection sources are never conflated: the
+      reject endpoint never overwrites `qa_result` (so `qa_pass_rate`
+      stays a pure QA-agent metric even after human overrides),
+      `human_approval_rate` is computed from `rejected_by` rather than
+      `qa_result`, and every place rejection text is surfaced (rolling
+      context block, weekly clustering corpus) tags each line with its
+      source rather than merging them into generic text
+- [x] No notification/email system built for the weekly review — it's a
+      queryable table only, per the brief's explicit "sufficient until
+      Phase 7" constraint
+- [x] No review-queue UI added — `reject`/`approve` are API routes only,
+      for Phase 7 to call into later
+- [x] `npx tsc --noEmit`, `npx eslint .`, and `npm run build` all pass with
+      zero errors
+- [x] Manually smoke-tested with fake Supabase/Anthropic credentials (same
+      approach as Phase 2/3): confirmed the reject endpoint's `400` on a
+      missing/blank `reason` fires *before* any Supabase call, confirmed
+      both endpoints' `404` on a nonexistent `content_item` id, confirmed
+      both cron routes' `401`/`500` split (rejected before touching
+      business logic on a missing/wrong `CRON_SECRET`, only failing on the
+      fake Supabase connection once the secret is correct), and confirmed
+      the Draft agent's new array-shaped `system` prompt (with
+      `cache_control`) is accepted by the real Anthropic API (a live `401
+      invalid x-api-key` response, not a client-side request-shape error)
+- [ ] A real end-to-end run against live Anthropic + Supabase confirmed to
+      populate a correctly-differentiated rolling rejection block and a
+      real `weekly_reviews` row from live data — *pending: requires a real
+      `ANTHROPIC_API_KEY` and a provisioned Supabase project; neither is
       available in this environment*
