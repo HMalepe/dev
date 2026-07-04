@@ -14,12 +14,15 @@ teams, roles, or multi-tenant anything.
   (Research → Draft → QA), and log every call to `agent_logs`. A single
   `run-pipeline` trigger takes a content item from nothing to
   `qa_passed`/`qa_rejected`. No asset generation or publishing yet.
-- **Phase 3** (asset pipeline): takes a `qa_passed` content item and
-  produces a finished long-form video, a vertical short with burned-in
+- **Phase 3** (asset pipeline): takes an approved (`scheduled`) content item
+  and produces a finished long-form video, a vertical short with burned-in
   captions, and a thumbnail — narration via ElevenLabs, assembly via
   Shotstack (submit-then-poll-via-cron, never synchronous), optional
   non-identifying B-roll via Kling, generic imagery via Pexels, automated
-  QA on every output, landing at `stage = 'assets_generated'`. No platform
+  QA on every output, landing at `stage = 'assets_generated'`. **Corrected
+  in Phase 7** to trigger on `stage = 'scheduled'` (i.e. after human
+  review) instead of `stage = 'qa_passed'` (immediately, before review) —
+  see "Phase 3/4/5 sequencing fix" under Phase 7 below. No platform
   publishing (Phase 5) or dashboard review UI (Phase 7) yet.
 - **Phase 4** (feedback loop): captures manual (human) rejections with the
   same rigor QA-agent rejections already get, builds a rolling "recently
@@ -35,6 +38,15 @@ teams, roles, or multi-tenant anything.
   reached a terminal state (`posted`/`ready`/`failed`) — not just the
   first to succeed. No further asset generation, no dashboard scheduling
   calendar (Phase 7).
+- **Phase 7** (dashboard): the three UI views this pipeline was missing —
+  a review queue (`/dashboard/review`), a scheduling calendar
+  (`/dashboard/calendar`), and an analytics view (`/dashboard/analytics`)
+  — plus a fix to a sequencing gap between Phase 3 and Phase 4/5 that had
+  to land before the review queue could mean anything: Phase 3's asset
+  pipeline now fires on `stage = 'scheduled'` (set by this phase's
+  approve action) instead of `stage = 'qa_passed'` (i.e. instantly, before
+  any human ever reviewed the script). Hand-rolled SVG charts, no charting
+  library dependency. Still one user, no role management.
 
 ## Stack
 
@@ -173,14 +185,17 @@ automatic retry" constraint).
   composited onto the hook beat's image) rather than a third Shotstack
   round-trip, per the brief's "don't overbuild this part".
 - `lib/agents/pipeline/assets/cron.ts` — `checkPendingRenders`, the core
-  logic behind the cron route. Per content item, per tick: resolve any
-  pending Kling jobs → submit the main render once they're all resolved →
-  poll the main render → poll the vertical render → run asset QA once all
-  three asset URLs exist. Downloads finished renders from Shotstack's
-  temporary URL and re-uploads to the `rendered-videos` Supabase Storage
-  bucket ("don't leave production assets solely dependent on a third-party
-  CDN link"). A `failed` render leaves `stage` untouched so it surfaces as
-  stuck rather than disappearing.
+  logic behind the cron route. Queries `stage = 'scheduled'` (**changed in
+  Phase 7** from `stage = 'qa_passed'` — see "Phase 7" below for why).
+  Per content item, per tick: kick off voiceover if nothing's started yet
+  (Phase 7's safety net for a missed direct trigger on approve) → resolve
+  any pending Kling jobs → submit the main render once they're all
+  resolved → poll the main render → poll the vertical render → run asset
+  QA once all three asset URLs exist. Downloads finished renders from
+  Shotstack's temporary URL and re-uploads to the `rendered-videos`
+  Supabase Storage bucket ("don't leave production assets solely
+  dependent on a third-party CDN link"). A `failed` render leaves `stage`
+  untouched so it surfaces as stuck rather than disappearing.
 - `lib/agents/pipeline/assets/qa.ts` — `runAssetQaCheck`. Resolution and
   watermark checks are deterministic (by construction / by Shotstack
   stage, see above) rather than re-inspected after the fact; duration
@@ -191,7 +206,9 @@ automatic retry" constraint).
   `stage` is left unchanged.
 - `app/api/agents/asset/voiceover/route.ts` — the pipeline's entry point:
   `{ contentItemId }` → voiceover → assemble, mirroring Phase 2's
-  research → draft → qa internal-chaining pattern.
+  research → draft → qa internal-chaining pattern. As of Phase 7, this is
+  also called directly (not just manually) by the approve endpoint the
+  instant a human approves a script — see "Phase 7" below.
 - `app/api/agents/asset/assemble/route.ts` — standalone re-trigger for the
   assemble step alone (e.g. to retry image sourcing/render submission
   without paying for another ElevenLabs call).
@@ -225,18 +242,19 @@ logged with `cost_usd: 0` — a real number, not a null placeholder.
   non-empty (400 if missing/blank/whitespace-only) — no silent, reason-less
   rejections, per the brief's own explicit constraint. Also guards that the
   item is actually at a stage that means "already passed automated QA"
-  (`qa_passed` or `assets_generated`) before allowing the transition (409
-  otherwise) — see "Deviations".
+  (`qa_passed`, `scheduled`, or `assets_generated` — `scheduled` added in
+  Phase 7, once that stage started meaning something) before allowing the
+  transition (409 otherwise) — see "Deviations".
 - `app/api/content-items/[id]/approve/route.ts` — companion endpoint,
   `POST` with an optional `{ scheduledAt?: string }` body (ISO timestamp;
-  defaults to "now"). Sets `scheduled_at` accordingly — corrected from an
-  earlier `stage = 'scheduled'` write once Phase 5 revealed its publish
-  scheduler actually queries `stage = 'assets_generated' AND scheduled_at
-  <= now()` and never looks for `stage = 'scheduled'` at all; see that
-  route's own comment and Phase 5's README section below for the full
-  story. Same stage guard as reject. Doesn't touch `rejected_by`/
-  `rejection_reason` — it doesn't generate feedback-loop data itself, per
-  the brief.
+  defaults to "now"). **This endpoint's behavior changed twice across
+  phases — see "Phase 7 — Phase 3/4/5 sequencing fix" below for the full,
+  final story and why**: it now sets both `scheduled_at` and
+  `stage = 'scheduled'`, and directly kicks off the Phase 3 asset
+  pipeline. Only allows the transition from `stage = 'qa_passed'` (409
+  otherwise, tightened in Phase 7 from also allowing `assets_generated`).
+  Doesn't touch `rejected_by`/`rejection_reason` — it doesn't generate
+  feedback-loop data itself, per the brief.
 - `lib/getRecentRejections.ts` — `getRecentRejectionsContext()`. Queries
   the 15 most recently updated `content_items` with a non-null
   `rejection_reason` (from either rejection source — see "Deviations" for
@@ -357,6 +375,131 @@ logged with `cost_usd: 0` — a real number, not a null placeholder.
 - `app/api/cron/refresh-tiktok-token/route.ts` + `vercel.json`'s daily
   entry — refreshes the TikTok access token, always persisting whatever
   `refresh_token` TikTok returns (TikTok rotates it on every use).
+
+### Phase 7 — dashboard
+
+#### Phase 3/4/5 sequencing fix (read this first)
+
+Phase 3 was originally specced to fire the instant `stage = 'qa_passed'`
+was reached — i.e. immediately after the QA agent scored a script, before
+any human ever saw it. Phase 4's `approve` endpoint, meanwhile, went
+through two different behaviors of its own (see the approve endpoint's
+own file history/comment): first `stage = 'scheduled'` (a stage nothing
+downstream actually watched for), then just `scheduled_at` (once Phase
+5's publish scheduler's real query — `stage = 'assets_generated' AND
+scheduled_at <= now()` — was known). Neither of those fixes addressed the
+actual bug: **assets were being generated automatically the moment QA
+passed, before a human ever got a chance to review the script** — which
+defeats the entire purpose of a review queue (money gets spent on video/
+audio generation before, not after, a human decides the script is worth
+that spend).
+
+Phase 7 fixes this at the root, per its own brief's section 0. Final,
+correct sequencing:
+
+1. QA agent passes an item → `stage = 'qa_passed'` (script only, no
+   assets yet — this is what shows up in the review queue)
+2. A human reviews and approves via `/dashboard/review` → the approve
+   endpoint sets `scheduled_at` **and** `stage = 'scheduled'`, and
+   immediately calls `runVoiceoverAgent` itself (not waiting for a
+   polling cron to notice)
+3. `lib/agents/pipeline/assets/cron.ts` now queries `stage = 'scheduled'`
+   (changed from `'qa_passed'`) and includes a safety-net branch: any
+   `'scheduled'` item with no `voiceover_url` and no `beat_plan` yet gets
+   `runVoiceoverAgent` called on it, in case the approve endpoint's direct
+   call failed or the request got interrupted. `runVoiceoverAgent` itself
+   is now idempotent (checks `asset_urls.voiceover_url` first and no-ops
+   if already set), so these two trigger paths can never double-generate
+   a voiceover.
+4. Assets complete → `stage = 'assets_generated'` (Phase 3's existing
+   `runAssetQaCheck` logic, completely unchanged)
+5. Phase 5's `publish-scheduled` cron picks up `assets_generated` items
+   where `scheduled_at <= now()` and publishes (unchanged — this part was
+   already correct, and always has been, since Phase 5)
+
+No new migration was needed — `'scheduled'` has been a valid
+`content_items.stage` enum value since `0001_init.sql`, it just wasn't
+being written or watched for by anything until now.
+
+#### What's new/changed
+
+- `app/api/content-items/[id]/approve/route.ts` — see above. Also
+  tightened `approvableStages` to `['qa_passed']` only (previously also
+  allowed `assets_generated`, which no longer makes sense: under the
+  corrected sequencing, `assets_generated` is always downstream of a
+  `scheduled` item that's already been approved once — approving it again
+  would re-trigger asset generation on an item that may already have, or
+  be generating, assets).
+- `app/api/content-items/[id]/reject/route.ts` — `rejectableStages` now
+  also includes `scheduled` (a human might approve, then notice a problem
+  before assets finish, and want to pull it back before more money is
+  spent generating video/audio for it).
+- `lib/agents/pipeline/assets/voiceover.ts` — idempotency guard (see
+  above).
+- `lib/agents/pipeline/assets/cron.ts` — stage query + safety-net kickoff
+  branch (see above).
+- `lib/agents/pipeline/publish/{instagram,tiktok}.ts` — `RATE_LIMIT_CEILING`
+  exported (was module-private) so the calendar's rate-limit headroom
+  indicator reads the exact same enforced number, never a separately
+  hardcoded copy that could drift.
+- `app/api/content-items/[id]/route.ts` — new `PATCH` endpoint. Partial
+  update of `scriptText`/`platformVariants` (merges onto the existing
+  `platform_variants` jsonb rather than replacing it wholesale), restricted
+  to `stage = 'qa_passed'` items (409 otherwise — editing after approval
+  would desync the script from whatever's already been voiced over or
+  rendered). This is what the review queue's inline editing saves through,
+  right before an approve/reject call, per the brief ("saved via PATCH
+  before approve/reject, not a separate 'edit mode'").
+- `app/dashboard/layout.tsx` — new shared nav shell (Home / Review Queue /
+  Calendar / Analytics / sign out) wrapping every `/dashboard/*` route.
+  Didn't exist before Phase 7; `app/dashboard/page.tsx` is unchanged and
+  now just renders inside it.
+- `app/dashboard/review/page.tsx` + `review-card.tsx` — the review queue.
+  Server Component fetches `content_items` at `stage = 'qa_passed'`
+  oldest-first (direct session-aware Supabase query, no new API route
+  needed for the read side); each row renders as a `ReviewCard` Client
+  Component with always-editable `script_text`/platform-variant textareas
+  (no separate edit mode), a read-only QA score breakdown, clickable
+  source links, a `scheduled_at` datetime picker, and Approve/Reject
+  actions that `PATCH` first if anything was edited, then call the
+  existing approve/reject endpoints.
+- `app/dashboard/calendar/page.tsx` + `post-card.tsx` — the scheduling
+  calendar. A plain 7-column CSS grid (Monday-start week, navigable via
+  `?week=YYYY-MM-DD`), no calendar library. Fetches `platform_posts`
+  joined to `content_items` for a generous window around the visible
+  week and buckets rows into day columns in memory (by `posted_at` if
+  posted, else the parent `scheduled_at`) rather than expressing an
+  OR-across-a-join filter in supabase-js — simple, and more than fast
+  enough at this pipeline's volume. Each day shows a rate-limit headroom
+  line per platform (`YT: n/100 used`, etc. — Instagram/TikTok read the
+  real enforced ceilings from `lib/platformCaps.ts`; YouTube's is
+  display-only, since nothing in this codebase enforces a YouTube quota
+  check, per Phase 5's own reasoning that it won't bind at any realistic
+  volume). Cards are color-coded by platform (red/pink/black-ish per the
+  brief) and additionally use border style (solid/dashed/dotted) +
+  opacity for status, so status is never color-only information.
+- `app/dashboard/analytics/page.tsx` + `charts.tsx` — the analytics view.
+  Hand-rolled SVG `LineChart`/`BarChart` components (no charting library,
+  per the brief's own constraint). Three sections: `weekly_reviews`'
+  `qa_pass_rate`/`human_approval_rate` trend line; `agent_logs`' real
+  cost-per-content-item (summed per `content_item_id`, then averaged
+  across every item with at least one costed log row — deliberately not
+  restricted to `stage = 'published'` items only, since that would
+  silently exclude the real, sunk cost of every rejected/failed attempt
+  along the way) plus a cost breakdown bar chart by `agent_name`; and
+  `platform_posts`' posts-by-platform bar chart plus a called-out
+  `status = 'failed'` count, both for the same `?week=` range as the
+  calendar. Every section handles its own empty/error state independently
+  (a fresh install renders three "nothing here yet" messages, not a
+  crash; a Supabase query error surfaces its own message without taking
+  down the other two sections).
+- `lib/dateRange.ts` — Monday-start week math shared by the calendar and
+  analytics pages (both default to "current week, navigable", and
+  analytics' platform-posts chart explicitly uses "the same date range as
+  the calendar view" per the brief).
+- `lib/platformCaps.ts` — the known per-platform daily caps, labels, and
+  colors used by the calendar (and re-exports Instagram/TikTok's real
+  enforced `RATE_LIMIT_CEILING` rather than duplicating those numbers).
 
 ## One-time manual setup
 
@@ -648,6 +791,30 @@ curl http://localhost:3000/api/cron/refresh-ig-token -H "Authorization: Bearer $
 curl http://localhost:3000/api/cron/refresh-tiktok-token -H "Authorization: Bearer $CRON_SECRET"
 ```
 
+### 11. Exercise the Phase 7 dashboard and confirm the sequencing fix
+
+Sign in at `/login`, then trace one item through the full lifecycle to
+confirm the fix in "Phase 7 — Phase 3/4/5 sequencing fix" above actually
+holds:
+
+1. Click "Generate New Case" on `/dashboard` (Research → Draft → QA).
+2. Once it reaches `qa_passed`, go to `/dashboard/review` — the item
+   should appear there. **Check `asset_urls` on the row directly in
+   Supabase right now: it should still be empty (`{}`).** This is the
+   actual assertion the brief's Definition of Done cares about — assets
+   must not exist yet at this point.
+3. Optionally edit the script/captions inline, pick a `scheduled_at`, and
+   click Approve. Confirm the row moves to `stage = 'scheduled'` and
+   `asset_urls.voiceover_url` gets populated within the same request (the
+   approve endpoint calls the asset pipeline directly) — or, if that call
+   happened to fail, within ~2 minutes via `check-renders`' safety net.
+4. Let `check-renders` run (every 2 minutes) until the row reaches
+   `stage = 'assets_generated'`.
+5. Once `scheduled_at` has passed, let `publish-scheduled` run (every 15
+   minutes, or trigger it manually per step 10) until `stage = 'published'`.
+6. Check `/dashboard/calendar` for the item's card and `/dashboard/analytics`
+   for its contribution to the cost-per-item and posts-by-platform numbers.
+
 ## Deviations from the task brief
 
 The original task brief asked for a `middleware.ts` file. This project was
@@ -844,14 +1011,17 @@ Phase 4 deviations, each flagged rather than silently made:
   be no way to recover it later. `rejected_by = 'human'` is what marks the
   override instead; `qa_result` keeps meaning exactly what the QA agent
   decided, forever.
-- **Both the reject and approve endpoints guard that the item is at `stage
-  = 'qa_passed'` or `stage = 'assets_generated'`** (409 otherwise), beyond
-  the brief's literal minimum-viable spec. "Something that already passed
-  automated QA" (the brief's own description of what this endpoint is for)
-  covers both stages in this codebase, since Phase 3 only ever generates
-  assets for an item that already passed QA — rejecting/approving anything
-  earlier in the pipeline (e.g. `researched`, `scripted`) would mean the
-  review queue is calling these out of order.
+- **Both the reject and approve endpoints guard that the item is at a
+  stage that means "already passed automated QA"** (409 otherwise),
+  beyond the brief's literal minimum-viable spec — rejecting/approving
+  anything earlier in the pipeline (e.g. `researched`, `scripted`) would
+  mean the review queue is calling these out of order. **Updated in
+  Phase 7**: approve's guard is now `qa_passed` only (tightened from also
+  allowing `assets_generated`, once `assets_generated` became strictly
+  downstream of an already-approved `scheduled` item — approving it again
+  would re-trigger asset generation); reject's guard gained `scheduled`
+  (a human can still pull an item back after approving it, before assets
+  finish).
 - **`items_processed` (section 5.1) is computed as `qa_result IS NOT
   NULL`, not `stage = 'qa_pending'`.** `stage` never actually parks at
   `qa_pending` in this codebase — Draft immediately chains into QA
@@ -910,11 +1080,15 @@ Phase 5 deviations, each flagged rather than silently made:
   fix is visible in Phase 4's own history — approve now sets
   `scheduled_at` (defaulting to "now") instead of advancing `stage`. See
   that route's own comment and Phase 4's PR for the full story.
-  `content_items.stage`'s `'scheduled'` enum value is consequently unused
-  by any code in this repo — left in place rather than removed, in case
-  Phase 7's dashboard wants it for a distinct "editorially scheduled for a
-  specific future date" state later; inventing that speculatively here
-  isn't this phase's call to make.
+  `content_items.stage`'s `'scheduled'` enum value was consequently unused
+  by any code in this repo at the time — left in place rather than
+  removed. **Phase 7 gave it a real, load-bearing meaning**: it's now the
+  stage an item sits at between human approval and the asset pipeline
+  finishing, and the trigger the asset pipeline itself watches for — see
+  "Phase 7 — Phase 3/4/5 sequencing fix" above. That earlier "corrected"
+  behavior (approve sets only `scheduled_at`, never touches `stage`) is
+  itself superseded by Phase 7; this bullet is left here as the historical
+  record of why the endpoint changed the way it did across three phases.
 - **Both Instagram and TikTok use a submit-then-poll-via-cron state
   machine across scheduler ticks, not synchronous in-request polling**,
   even though section 4/5's prose ("poll... until FINISHED"/"poll for
@@ -997,6 +1171,75 @@ Phase 5 deviations, each flagged rather than silently made:
   Only items that first reach `assets_generated` *after* the flip go
   through the audited API path — not a re-scan of previously-deferred
   ones.
+
+Phase 7 deviations, each flagged rather than silently made:
+
+- **The Phase 3/4/5 sequencing fix (section 0 of this phase's own brief)
+  touches files from three earlier phases** (`approve/route.ts`,
+  `reject/route.ts`, `voiceover.ts`, `cron.ts`) rather than being confined
+  to new dashboard code. The brief itself calls this out explicitly
+  ("closes a sequencing gap... that needs fixing first" / "don't skip
+  section 0's fix to 'save time'"), so this isn't scope creep — it's the
+  brief's own first, mandatory deliverable.
+- **The asset pipeline kickoff is triggered two ways, not one**: directly
+  from the approve endpoint (fast path — no waiting for the next cron
+  tick) *and* as a safety-net branch in `check-renders` for any
+  `'scheduled'` item that doesn't have a `voiceover_url` yet. The brief
+  phrased this as an "either/or" choice ("either call the asset-assemble
+  endpoint directly from the approve action... or add a cron check").
+  Both were built because they cover different failure modes: the direct
+  call gives immediate, low-latency kickoff in the common case, while the
+  cron safety net is the only thing that recovers an item stuck at
+  `'scheduled'` with no assets if that direct call fails, times out, or
+  the request is interrupted after the `stage` update commits but before
+  the asset call runs. `runVoiceoverAgent` was made idempotent
+  specifically so these two paths can safely coexist without ever
+  double-billing ElevenLabs.
+- **The review queue's data fetch is a direct Server Component Supabase
+  query, not a new `GET` API route** — consistent with how
+  `app/dashboard/page.tsx` already used `createClient()` directly rather
+  than calling its own API, and avoiding a pure-read API layer this
+  single-user app has no other use for. Mutations (approve/reject/PATCH)
+  still go through API routes, since those need to be callable from a
+  Client Component's `fetch()`.
+- **The calendar's rate-limit headroom indicator counts `status =
+  'posted'` rows by calendar day (using each row's own `posted_at`
+  date), not a true rolling 24-hour window ending "right now."** The
+  brief's actual enforcement (`lib/agents/pipeline/publish/shared.ts`'s
+  `isRateLimited`) is correctly rolling-24h and unaffected by this — this
+  is a display-only simplification, necessary because a day-grid UI has
+  no natural way to show a constantly-sliding window per cell, and a
+  per-calendar-day count is what "matches what a manual count of today's
+  platform_posts would show" (the brief's own Definition of Done wording)
+  actually means for a single, static day.
+- **YouTube's daily cap (100) shown on the calendar is not backed by any
+  runtime check anywhere in this codebase** — see `lib/platformCaps.ts`'s
+  own comment. It's included because the brief explicitly asks for it
+  ("YouTube ~100/day") as a display figure; Phase 5 deliberately never
+  built quota-conservation logic for YouTube since it won't bind at any
+  realistic volume this pipeline runs at.
+- **Analytics' cost-per-content-item average is computed across every
+  content item with at least one costed `agent_logs` row, not scoped to
+  `stage = 'published'` items only.** The brief's own instruction ("Total
+  cost_usd summed per content_item_id, then averaged") doesn't specify a
+  stage filter. Restricting to published items only would understate the
+  pipeline's real cost by silently dropping every rejected/failed
+  attempt's already-spent cost from the denominator — the opposite of
+  what "your real cost-per-published-post... replacing the estimate with
+  actuals" is asking for. (There is no Phase 6 in this codebase to
+  "replace an estimate" from — Phase 6 was never built; this phase
+  computes the real number from scratch.)
+- **The "posts by platform" bar chart and the "failed" count both filter
+  `platform_posts` by `created_at` within the selected week**, not by
+  `posted_at` (which is `null` for anything that hasn't posted, including
+  every failed attempt). `created_at` is the one timestamp every row has
+  unconditionally, making it the only consistent way to answer "what
+  publishing activity happened this week" across both successful and
+  failed attempts in one query.
+- **No live end-to-end test against a real Supabase project with real
+  data was possible in this environment** (no provisioned project, no
+  `docker`/Supabase CLI available to run a local stack) — see Definition
+  of Done below for exactly what was and wasn't verified as a result.
 
 ## Definition of done — Phase 0
 
@@ -1256,3 +1499,91 @@ Phase 5 deviations, each flagged rather than silently made:
       real Meta app + linked Instagram Business account, and a real
       (ideally already-audited) TikTok Content Posting API app; none
       available in this environment*
+
+## Definition of done — Phase 7
+
+- [x] The Phase 3/Phase 4 sequencing gap from section 0 is fixed —
+      `lib/agents/pipeline/assets/cron.ts` now queries
+      `stage = 'scheduled'` (not `'qa_passed'`), the approve endpoint sets
+      `stage = 'scheduled'` and calls `runVoiceoverAgent` directly, and
+      `runVoiceoverAgent` is idempotent so the direct call and the cron's
+      safety-net branch can never double-generate a voiceover — verified
+      by inspection of every code path involved (see "Phase 7 — Phase
+      3/4/5 sequencing fix" above) and by smoke-testing the approve/
+      reject/PATCH endpoints' request-shape and error-handling logic
+      against a fake Supabase project (see below). *Tracing one real item
+      through the full lifecycle end-to-end (research → draft → QA pass →
+      approval → assets generate → publish) and confirming
+      `asset_urls` stays empty until after approval requires a
+      provisioned Supabase project with real Anthropic/asset-provider
+      credentials; not available in this environment — see setup step 11
+      for the exact manual verification procedure to run once deployed.*
+- [x] The review queue lets you edit `script_text`/`platform_variants`
+      inline (always-editable textareas, no separate edit mode), and both
+      the new `PATCH` route and the approve/reject flow that calls it
+      first (if anything changed) actually update the database — verified
+      by inspection of `ReviewCard`'s `saveEditsIfDirty` → approve/reject
+      sequencing and by smoke-testing `PATCH`'s validation (`400` on an
+      empty body or blank `scriptText`) and its stage guard (`409`-shaped
+      error path for non-`qa_passed` items, `404` for a nonexistent id)
+      against a fake Supabase project
+- [x] The calendar view's rate-limit headroom indicator reads
+      Instagram/TikTok's exact enforced `RATE_LIMIT_CEILING` constants
+      (re-exported from the Phase 5 publish agents, not duplicated) and
+      counts real `platform_posts` rows per day per platform — by
+      construction this can never drift from "what a manual count of
+      today's `platform_posts` would show," since it's the same
+      `status = 'posted'` count either way; see the Phase 7 deviations
+      note above on why it's a per-calendar-day count rather than a
+      true rolling 24h window
+- [x] The analytics view's cost-per-post number is computed from real,
+      summed `agent_logs.cost_usd` grouped by `content_item_id` and
+      averaged — never hardcoded or estimated. Verified by inspection of
+      the aggregation logic in `app/dashboard/analytics/page.tsx`; a real
+      non-zero number requires actual pipeline runs with real API keys,
+      not available in this environment
+- [x] Every view handles the empty-state case gracefully — verified by
+      running all three pages against a fake, unreachable Supabase
+      project (every query fails with `TypeError: fetch failed`): the
+      review queue and calendar both render an explicit error banner
+      without crashing (and the calendar's day grid still renders fully,
+      all-zero); analytics renders all three of its own per-section error
+      banners independently, none of them blocking the other two
+      sections' render; the dashboard layout's own auth check redirects
+      to `/login` rather than throwing when `auth.getUser()` fails against
+      an unreachable project. A genuinely empty-but-reachable database
+      (zero rows, no error) hits the same empty-state branches (`items.
+      length === 0`, `perItemCosts.length === 0`, etc.), which were
+      exercised directly via code inspection of every such branch, since
+      a real empty-but-connected Supabase project isn't available in this
+      environment either.
+- [x] No charting library dependency was added — `package.json` is
+      unchanged from Phase 5; `app/dashboard/analytics/charts.tsx` is
+      ~100 lines of hand-rolled SVG
+- [x] No user/role management added — the dashboard layout's auth check
+      is the same single-user `auth.getUser()` pattern used since Phase 0
+- [x] `npx tsc --noEmit`, `npx eslint .`, and `npm run build` all pass with
+      zero errors
+- [x] Manually smoke-tested with a fake Supabase project (`https://fake-
+      project-ref.supabase.co`) and `proxy.ts` temporarily disabled (same
+      approach as every earlier phase): confirmed `PATCH
+      /api/content-items/[id]`'s `400`s fire before any Supabase call
+      (empty body, blank `scriptText`), confirmed it and the approve/
+      reject endpoints all return a graceful `404` (not a crash) once
+      they reach the fake, unreachable project; confirmed
+      `check-renders`' `401`/`500` split is unchanged after the stage-
+      query edit; confirmed all three new dashboard pages return `200`
+      and render their respective error/empty states (not a 500) against
+      the same fake project, both under normal auth (redirects to
+      `/login`, proving the layout's auth check doesn't itself crash on a
+      network failure) and with auth temporarily bypassed to inspect the
+      page bodies directly
+- [ ] A real end-to-end trace through the full lifecycle against a live
+      Supabase project with real content — confirming assets genuinely
+      don't start generating until after a human clicks Approve, that the
+      calendar/analytics numbers match a manual count of real rows, and
+      that the empty-state and populated-state UI both look right with
+      actual browser rendering (not just server-rendered HTML inspected
+      via `curl`) — *pending: requires a provisioned Supabase project,
+      real Anthropic/asset-provider credentials, and ideally a real
+      browser session; none available in this environment*
