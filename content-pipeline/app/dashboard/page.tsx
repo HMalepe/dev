@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "./actions";
+import { RunPipelineButton } from "./run-pipeline-button";
 
 /**
- * Bare authenticated placeholder. Intentionally empty — later phases build
- * the real dashboard (content review queue, publish status, etc.) here.
+ * Bare authenticated placeholder plus the Phase 2 pipeline trigger. Later
+ * phases build the real dashboard (content review queue, publish status,
+ * etc.) here.
  */
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -26,6 +28,9 @@ export default async function DashboardPage() {
       <p className="text-sm text-zinc-500 dark:text-zinc-400">
         Signed in as {user.email}. Session is live.
       </p>
+
+      <RunPipelineButton />
+
       <form action={signOut}>
         <button
           type="submit"
