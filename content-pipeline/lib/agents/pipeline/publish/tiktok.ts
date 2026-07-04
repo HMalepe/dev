@@ -6,7 +6,10 @@ import { getContentItemForPublish, getOrCreatePlatformPost, isRateLimited, updat
 /** Community-reported TikTok caps land around 15-25/day per creator (not
  * officially documented) -- 15 is the brief's own explicit "stay safely
  * under whatever the actual enforced number is" ceiling. */
-const RATE_LIMIT_CEILING = 15;
+/** Exported so the Phase 7 calendar's rate-limit headroom indicator shows
+ * the exact same ceiling actually enforced here -- never a separately
+ * hardcoded, driftable copy of the same number. */
+export const RATE_LIMIT_CEILING = 15;
 
 /**
  * TikTok publish agent (Phase 5, section 5). Branches its entire behavior

@@ -3,7 +3,10 @@ import { logAgentCall } from "@/lib/logAgentCall";
 import { getPlatformToken } from "@/lib/platformTokens";
 import { getContentItemForPublish, getOrCreatePlatformPost, isRateLimited, updatePlatformPost, type PlatformPostRow } from "./shared";
 
-const RATE_LIMIT_CEILING = 25;
+/** Exported so the Phase 7 calendar's rate-limit headroom indicator shows
+ * the exact same ceiling actually enforced here -- never a separately
+ * hardcoded, driftable copy of the same number. */
+export const RATE_LIMIT_CEILING = 25;
 
 /**
  * Instagram publish agent (Phase 5, section 4). Two-step Meta publish
