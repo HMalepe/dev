@@ -7,6 +7,7 @@ import { mergeAssetUrls, getAssetUrls } from "./assetUrls";
 import { submitMainRender } from "./assemble";
 import { generateVerticalAndThumbnail } from "./vertical";
 import { runAssetQaCheck } from "./qa";
+import { runVoiceoverAgent } from "./voiceover";
 import type { AssetUrls, BeatPlanEntry } from "./types";
 
 const RENDERED_VIDEO_BUCKET = "rendered-videos";
@@ -26,15 +27,24 @@ export interface CronSummary {
  */
 export async function checkPendingRenders(): Promise<CronSummary> {
   const supabase = createServiceRoleClient();
-  // Every row this pipeline cares about is at stage='qa_passed' until
-  // asset QA passes and advances it to 'assets_generated' -- fetching by
-  // stage instead of by nested asset_urls fields sidesteps jsonb path
-  // query syntax entirely and is more than fast enough at this pipeline's
-  // (single-channel) volume.
+  // Every row this pipeline actively works on is at stage='scheduled'
+  // until asset QA passes and advances it to 'assets_generated' --
+  // fetching by stage instead of by nested asset_urls fields sidesteps
+  // jsonb path query syntax entirely and is more than fast enough at this
+  // pipeline's (single-channel) volume.
+  //
+  // This was 'qa_passed' before Phase 7's section 0 fix: Phase 3 was
+  // originally specced to fire the instant QA passed, before a human
+  // ever reviewed the script -- defeating the entire point of a review
+  // gate (assets, i.e. money, would already be spent by the time a human
+  // saw the item). The review queue (app/dashboard/review) now gates
+  // entry into this pipeline: only once a human calls the approve
+  // endpoint does a row become 'scheduled', which is what this cron (and
+  // the direct kickoff in the approve endpoint itself) now watches for.
   const { data: items, error } = await supabase
     .from("content_items")
     .select("id, asset_urls")
-    .eq("stage", "qa_passed");
+    .eq("stage", "scheduled");
 
   if (error) {
     throw new Error(`checkPendingRenders: failed to query content_items: ${error.message}`);
@@ -56,6 +66,20 @@ export async function checkPendingRenders(): Promise<CronSummary> {
 }
 
 async function processItem(contentItemId: string, assetUrls: AssetUrls): Promise<string | null> {
+  // Safety net for the approve endpoint's direct runVoiceoverAgent call
+  // (app/api/content-items/[id]/approve/route.ts): if that call failed,
+  // or the request was interrupted before it ran, this item would
+  // otherwise sit at 'scheduled' with an empty asset_urls forever. Once
+  // any asset work has started (beat_plan exists), the branches below
+  // take over -- this only ever fires for a genuinely un-started item.
+  // runVoiceoverAgent itself is idempotent (checks voiceover_url first),
+  // so this can never race-duplicate a generation that the direct call
+  // already kicked off successfully.
+  if (!assetUrls.voiceover_url && !assetUrls.beat_plan) {
+    await runVoiceoverAgent(contentItemId);
+    return "kicked off voiceover + assembly (safety net for a missed direct trigger on approve)";
+  }
+
   if (assetUrls.beat_plan && assetUrls.main_render_submitted === false) {
     return resolveKlingThenSubmitMain(contentItemId, assetUrls.beat_plan, assetUrls.voiceover_url!);
   }

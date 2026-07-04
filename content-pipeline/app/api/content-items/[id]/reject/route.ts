@@ -40,13 +40,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   // Guardrail beyond the brief's literal minimum: rejecting only makes
-  // sense for something that actually passed automated QA -- that's either
-  // 'qa_passed' itself, or 'assets_generated' (Phase 3 only ever generates
-  // assets for items that already passed QA, so it's still "something that
-  // already passed automated QA" per this endpoint's own description, just
-  // further along). Anything else means the review queue is calling this
-  // out of order.
-  const rejectableStages = ["qa_passed", "assets_generated"];
+  // sense for something that actually passed automated QA -- that's
+  // 'qa_passed' itself, or anywhere further along the pipeline
+  // ('scheduled', 'assets_generated') since Phase 3 only ever generates
+  // assets for items that already passed QA and were then approved.
+  // 'scheduled' was added in Phase 7: a human might approve an item, then
+  // (before assets finish) notice a problem and want to pull it back
+  // before any more money is spent generating video/audio for it.
+  // Anything else means the review queue is calling this out of order.
+  const rejectableStages = ["qa_passed", "scheduled", "assets_generated"];
   if (!rejectableStages.includes(existing.stage)) {
     return NextResponse.json(
       {

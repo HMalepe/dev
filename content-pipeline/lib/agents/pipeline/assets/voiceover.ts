@@ -2,7 +2,7 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 import { logAgentCall } from "@/lib/logAgentCall";
 import { textToSpeech } from "@/lib/integrations/elevenlabs";
 import { uploadToStorage } from "@/lib/supabase/storage";
-import { mergeAssetUrls } from "./assetUrls";
+import { getAssetUrls, mergeAssetUrls } from "./assetUrls";
 import { runAssembleAgent } from "./assemble";
 
 const VOICEOVER_BUCKET = "voiceover-audio";
@@ -14,8 +14,21 @@ const VOICEOVER_BUCKET = "voiceover-audio";
  * -- mirroring the Phase 2 research -> draft -> qa internal-chaining
  * pattern rather than requiring the dashboard to call four separate
  * endpoints.
+ *
+ * As of Phase 7, this can legitimately be called twice for the same
+ * content_item in a race: the approve endpoint calls it directly, and
+ * the check-renders cron also calls it as a safety net for items that
+ * reached 'scheduled' without a successful direct kickoff. Idempotent by
+ * checking asset_urls.voiceover_url first -- a no-op return here avoids
+ * double-billing ElevenLabs and clobbering an in-progress/finished
+ * asset_urls state with a second, redundant generation.
  */
 export async function runVoiceoverAgent(contentItemId: string): Promise<void> {
+  const existingAssetUrls = await getAssetUrls(contentItemId);
+  if (existingAssetUrls.voiceover_url) {
+    return;
+  }
+
   const supabase = createServiceRoleClient();
   const { data: item, error } = await supabase
     .from("content_items")
