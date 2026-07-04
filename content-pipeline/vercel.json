@@ -1,6 +1,9 @@
 {
   "crons": [
     { "path": "/api/cron/check-renders", "schedule": "*/2 * * * *" },
-    { "path": "/api/cron/weekly-review", "schedule": "0 6 * * 1" }
+    { "path": "/api/cron/weekly-review", "schedule": "0 6 * * 1" },
+    { "path": "/api/cron/publish-scheduled", "schedule": "*/15 * * * *" },
+    { "path": "/api/cron/refresh-ig-token", "schedule": "0 5 * * 1" },
+    { "path": "/api/cron/refresh-tiktok-token", "schedule": "0 5 * * *" }
   ]
 }
