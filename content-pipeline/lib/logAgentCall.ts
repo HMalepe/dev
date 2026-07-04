@@ -20,8 +20,19 @@ export interface LogAgentCallParams {
   contentItemId: string | null;
   agentName: "research" | "draft" | "qa" | "asset" | "publish";
   model: string;
-  inputTokens: number;
-  outputTokens: number;
+  /** Omit for non-token-based APIs (ElevenLabs, Shotstack, Kling, Pexels) —
+   * there's nothing meaningful to put here, so the column is left null
+   * rather than conflating characters/seconds/requests with "tokens". */
+  inputTokens?: number;
+  outputTokens?: number;
+  /**
+   * Pre-computed cost in USD for calls that aren't priced per-token
+   * (ElevenLabs is per-character, Shotstack/Kling are per-second/per-
+   * render, Pexels is free). When provided, this is used as-is instead of
+   * the token-based PRICING lookup below, which only covers Anthropic
+   * models.
+   */
+  costUsd?: number;
   status: "success" | "fail" | "retry";
   outputSummary: string;
 }
@@ -32,13 +43,17 @@ export async function logAgentCall({
   model,
   inputTokens,
   outputTokens,
+  costUsd: explicitCostUsd,
   status,
   outputSummary,
 }: LogAgentCallParams): Promise<void> {
   const rates = PRICING[model as keyof typeof PRICING];
-  const costUsd = rates
-    ? (inputTokens / 1_000_000) * rates.input + (outputTokens / 1_000_000) * rates.output
-    : null;
+  const costUsd =
+    explicitCostUsd !== undefined
+      ? explicitCostUsd
+      : rates
+        ? ((inputTokens ?? 0) / 1_000_000) * rates.input + ((outputTokens ?? 0) / 1_000_000) * rates.output
+        : null;
 
   const supabase = createServiceRoleClient(); // service role — server-only, bypasses RLS for logging
 
@@ -46,8 +61,8 @@ export async function logAgentCall({
     content_item_id: contentItemId,
     agent_name: agentName,
     model_used: model,
-    input_tokens: inputTokens,
-    output_tokens: outputTokens,
+    input_tokens: inputTokens ?? null,
+    output_tokens: outputTokens ?? null,
     cost_usd: costUsd,
     status,
     output_summary: outputSummary,

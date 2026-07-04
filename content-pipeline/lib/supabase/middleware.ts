@@ -41,8 +41,12 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const isLoginRoute = request.nextUrl.pathname.startsWith("/login");
+  // Vercel's cron invoker has no Supabase session cookie -- this route
+  // enforces its own (stronger) CRON_SECRET bearer-token check instead,
+  // see app/api/cron/check-renders/route.ts.
+  const isCronRoute = request.nextUrl.pathname.startsWith("/api/cron/");
 
-  if (!user && !isLoginRoute) {
+  if (!user && !isLoginRoute && !isCronRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
