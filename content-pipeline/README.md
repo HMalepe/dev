@@ -28,6 +28,13 @@ teams, roles, or multi-tenant anything.
   rubric), and a weekly cron snapshot (`weekly_reviews`) tracking whether
   QA pass rate is actually improving. No review-queue UI (Phase 7) — this
   phase only builds the capture/feedback logic that UI will call into.
+- **Phase 5** (platform publishing): three independent publish agents
+  (YouTube, Instagram, TikTok) plus a 15-minute scheduler that respects
+  each platform's own rate limit, writes results to `platform_posts`, and
+  advances `content_items.stage` to `'published'` once every platform has
+  reached a terminal state (`posted`/`ready`/`failed`) — not just the
+  first to succeed. No further asset generation, no dashboard scheduling
+  calendar (Phase 7).
 
 ## Stack
 
@@ -276,6 +283,81 @@ logged with `cost_usd: 0` — a real number, not a null placeholder.
   `lib/supabase/middleware.ts` already covers this route, no changes
   needed there).
 
+### Phase 5 — platform publishing
+
+- `supabase/migrations/0003_platform_publishing.sql` — adds the
+  `platform_tokens` table (`platform`, `access_token`, `refresh_token`,
+  `expires_at`), reusing 0002's `set_updated_at()` trigger, and a
+  `platform_posts.provider_job_id` column (see "Deviations" for why this
+  is needed beyond the brief's literal schema).
+- `lib/integrations/youtube.ts` — `uploadVideoToYoutube`. Uses the
+  official `googleapis` client (added as a dependency) rather than
+  hand-rolled multipart/resumable HTTP, for the same reason
+  `@anthropic-ai/sdk` is used elsewhere instead of raw fetch — resumable
+  upload semantics are easy to get subtly wrong by hand. Sets
+  `status.publishAt` + `privacyStatus: 'private'` when `scheduled_at` is
+  in the future, `privacyStatus: 'public'` otherwise, exactly per the
+  brief.
+- `lib/integrations/instagram.ts` — `createReelContainer`,
+  `getContainerStatus`, `publishContainer` (Meta's three-step Reels
+  publish flow), and `exchangeForLongLivedToken` (the weekly refresh
+  cron's core call). Hits `graph.facebook.com` (not the newer
+  `graph.instagram.com` "Instagram API with Instagram Login" product),
+  matching the brief's own OAuth setup description (Facebook Page-linked
+  Business/Creator account, Facebook Login flow).
+- `lib/integrations/tiktok.ts` — `refreshTiktokAccessToken`,
+  `queryCreatorInfo`, `initVideoPublish` (via `PULL_FROM_URL`, since our
+  videos already live at a public Supabase Storage URL), and
+  `fetchPublishStatus`.
+- `lib/platformTokens.ts` — `getPlatformToken`/`setPlatformToken`.
+  Bootstraps `platform_tokens` from the one-time OAuth consent flow's seed
+  env vars (`INSTAGRAM_ACCESS_TOKEN`, `TIKTOK_ACCESS_TOKEN`/
+  `TIKTOK_REFRESH_TOKEN`) on first use; after that, the table (kept fresh
+  by the two refresh crons below) is the sole source of truth and the env
+  vars are never read again.
+- `lib/agents/pipeline/publish/shared.ts` — `getOrCreatePlatformPost`,
+  `updatePlatformPost`, `isRateLimited` (the brief's own rolling-24h-window
+  rate-limit check, generalized across Instagram and TikTok instead of
+  duplicated per platform), and `getContentItemForPublish`.
+- `lib/agents/pipeline/publish/youtube.ts` — `runYoutubePublishAgent`.
+  Single-shot: downloads `asset_urls.main_video_url`, uploads it, and
+  either succeeds or fails on one attempt (no async job to poll, unlike
+  Instagram/TikTok). Logs `cost_usd: 0` (never `null`) per the brief.
+- `lib/agents/pipeline/publish/instagram.ts` — `runInstagramPublishAgent`.
+  Checks the rolling 25/24hr limit *before* attempting a post; submits a
+  Reels container using `asset_urls.vertical_video_url` (see "Deviations"
+  for why the vertical cut, not the main video); a later call/tick resumes
+  polling an already-submitted container (via `provider_job_id`) rather
+  than submitting a duplicate, and only calls `media_publish` once
+  `status_code = FINISHED`.
+- `lib/agents/pipeline/publish/tiktok.ts` — `runTiktokPublishAgent`.
+  Branches its entire behavior on `TIKTOK_AUDITED`: `false` sets
+  `status = 'ready'` immediately (logged as `success`, per the brief —
+  correctly deferring to manual posting is not a failure) and never calls
+  the API at all; `true` checks the conservative 15/24hr limit, queries
+  `creator_info` fresh before every post (never cached), and follows the
+  same submit-then-resume-polling pattern as Instagram.
+- `lib/agents/pipeline/publish/scheduler.ts` — `runPublishScheduler`, the
+  `publish-scheduled` cron's core logic. Queries `content_items` at
+  `stage = 'assets_generated'` with `scheduled_at <= now()`, attempts all
+  three platforms independently per item (one platform's failure/rate
+  limit never blocks the others), and only advances `stage = 'published'`
+  once every `platform_posts` row for that item is in a terminal state.
+- `app/api/agents/publish/{youtube,instagram,tiktok}/route.ts` — thin
+  standalone wrappers for manually re-triggering a single platform's agent
+  on one `content_item`, mirroring Phase 2/3's route pattern.
+- `app/api/cron/publish-scheduled/route.ts` + `vercel.json`'s
+  `*/15 * * * *` entry — the scheduler above, `CRON_SECRET`-gated like
+  every other cron route.
+- `app/api/cron/refresh-ig-token/route.ts` + `vercel.json`'s weekly entry
+  — exchanges the current Instagram token for a fresh 60-day one via
+  `fb_exchange_token`, unconditionally on schedule (not gated on
+  `expires_at` — a weekly cadence against a 60-day token has enormous
+  margin either way).
+- `app/api/cron/refresh-tiktok-token/route.ts` + `vercel.json`'s daily
+  entry — refreshes the TikTok access token, always persisting whatever
+  `refresh_token` TikTok returns (TikTok rotates it on every use).
+
 ## One-time manual setup
 
 These steps require your own Supabase and Vercel accounts/credentials and
@@ -285,13 +367,14 @@ can't be done from an automated agent session — do them once, yourself:
 
 1. Create a new project at [supabase.com](https://supabase.com).
 2. Apply the schema in `supabase/migrations/0001_init.sql`, then
-   `supabase/migrations/0002_feedback_loop.sql`, in that order, via either:
+   `0002_feedback_loop.sql`, then `0003_platform_publishing.sql`, in that
+   order, via either:
    - **Supabase CLI:** `supabase link --project-ref <ref>` then `supabase db push`, or
    - **Dashboard SQL editor:** paste the contents of each migration file and run it.
 3. Confirm the tables exist (Table Editor, or
    `select table_name from information_schema.tables where table_schema = 'public';`)
-   — you should see `content_items`, `platform_posts`, `agent_logs`, and
-   (after 0002) `weekly_reviews`.
+   — you should see `content_items`, `platform_posts`, `agent_logs`,
+   `weekly_reviews` (after 0002), and `platform_tokens` (after 0003).
 4. Create your one user account manually: Authentication → Users → Add user
    (email + password). There is intentionally no public signup page.
 
@@ -328,10 +411,66 @@ asset pipeline, also fill in:
   its own cron invocations once you add the same value as a Vercel project
   env var.
 
-Leave the YouTube/Instagram/TikTok publishing variables blank for now —
-they're placeholders for Phase 4/5.
+To run the Phase 5 publish pipeline, also complete the one-time OAuth
+setup in step 3 below and fill in the YouTube/Instagram/TikTok variables
+it produces. Leave them blank until then.
 
-### 3. Run locally
+### 3. OAuth setup for Phase 5 platform publishing
+
+Per the Phase 5 brief's own instruction: these are one-time, manual,
+out-of-band consent flows — document them, don't try to automate the
+initial consent. Skip this step entirely if you're not running the
+publish pipeline yet; nothing else in this repo depends on it.
+
+**YouTube:**
+1. Create a Google Cloud project, enable the **YouTube Data API v3**.
+2. Create an OAuth 2.0 Client ID (type: **Desktop app**) — copy the client
+   ID/secret into `YOUTUBE_CLIENT_ID`/`YOUTUBE_CLIENT_SECRET`.
+3. Run the consent flow once, locally, with a script using the
+   `googleapis` client (already a dependency here) and the
+   `https://www.googleapis.com/auth/youtube.upload` scope, authorizing
+   against your own channel. Store the resulting `refresh_token` as
+   `YOUTUBE_REFRESH_TOKEN` — it doesn't expire unless revoked, so this is
+   genuinely one-time.
+
+**Instagram:**
+1. Create a Meta Developer app, add the **Instagram Graph API** product.
+2. Link an Instagram Business/Creator account to a Facebook Page (Meta
+   requires this — the newer accountless "Instagram API with Instagram
+   Login" product is a different, incompatible integration path from the
+   one this codebase implements).
+3. Run the Facebook Login flow once to get a short-lived user token, then
+   exchange it for a long-lived one (`grant_type=fb_exchange_token`) —
+   store that as `INSTAGRAM_ACCESS_TOKEN` (seeds `platform_tokens` on
+   first use; the weekly refresh cron takes over from there).
+4. Note your Instagram **Business Account ID** (not your Facebook Page ID
+   — Graph API Explorer's `/me/accounts` → the linked Page →
+   `instagram_business_account` field) as `INSTAGRAM_BUSINESS_ACCOUNT_ID`.
+5. Copy the app's ID/secret into `INSTAGRAM_APP_ID`/`INSTAGRAM_APP_SECRET`
+   — required for the weekly token-refresh cron's `fb_exchange_token`
+   call, not just the initial consent flow.
+
+**TikTok:**
+1. Confirm your Content Posting API app registration was submitted for
+   audit back in Phase 0. **If it wasn't yet, flag this back to yourself
+   immediately and submit it now** — audit turnaround is a 1-6 week
+   external clock, and until it clears, the TikTok agent runs in its
+   `TIKTOK_AUDITED=false` branch (defers to manual posting, see below).
+2. In the TikTok Developer portal, verify your Supabase Storage domain
+   (`<project-ref>.supabase.co`) as a **URL property** — required for the
+   `PULL_FROM_URL` publish method this codebase uses; unverified URLs are
+   rejected outright by TikTok's API, not just discouraged.
+3. Copy `TIKTOK_CLIENT_KEY`/`TIKTOK_CLIENT_SECRET` from the app.
+4. Run the OAuth consent flow once to get an initial `access_token` +
+   `refresh_token` (365-day lifetime) — store as `TIKTOK_ACCESS_TOKEN`/
+   `TIKTOK_REFRESH_TOKEN` (seeds `platform_tokens` on first use; the daily
+   refresh cron takes over from there, rotating the refresh token on every
+   use).
+5. Leave `TIKTOK_AUDITED=false` until TikTok actually approves the app,
+   then flip it to `true` manually — this is the flag the TikTok publish
+   agent branches its entire behavior on.
+
+### 4. Run locally
 
 ```bash
 npm install
@@ -341,7 +480,7 @@ npm run dev
 Visit `http://localhost:3000` — you should be redirected to `/login`. Sign
 in with the user you created in step 1 and you should land on `/dashboard`.
 
-### 4. Deploy
+### 5. Deploy
 
 1. Push this repo to GitHub (already done if you're reading this from the repo).
 2. Import the repo into a new Vercel project.
@@ -350,7 +489,7 @@ in with the user you created in step 1 and you should land on `/dashboard`.
 4. Deploy, then confirm the deployed URL loads `/login` and, after signing
    in, reaches `/dashboard`.
 
-### 5. Run the Phase 1 QA calibration
+### 6. Run the Phase 1 QA calibration
 
 With `ANTHROPIC_API_KEY` set in `.env.local`:
 
@@ -364,7 +503,7 @@ match `qa-calibration/manifest.json`'s expectations. Per
 `docs/brand-voice-qa-rubric.md`, the QA agent should not be wired into any
 live route until this passes consistently.
 
-### 6. Run the Phase 2 pipeline
+### 7. Run the Phase 2 pipeline
 
 With every Supabase and `ANTHROPIC_API_KEY` variable set, sign in on
 `/dashboard` and click **Generate New Case** — this calls
@@ -383,7 +522,7 @@ Every Anthropic call this makes is logged to `agent_logs` with a non-null
 exactly where the chain stopped, if it didn't reach `qa_passed`/
 `qa_rejected`).
 
-### 7. Run the Phase 3 asset pipeline
+### 8. Run the Phase 3 asset pipeline
 
 With every Phase 3 env var set (ElevenLabs, Shotstack, Pexels, and
 optionally Kling — see step 2), take a `content_items` row that's already
@@ -419,7 +558,7 @@ Two new Supabase Storage buckets (`voiceover-audio`, `rendered-videos`)
 plus `thumbnails` are created automatically on first use — nothing to
 provision manually beyond the schema in step 1.
 
-### 8. Exercise the Phase 4 feedback loop
+### 9. Exercise the Phase 4 feedback loop
 
 Manually reject a `content_items` row that's already at `stage =
 'qa_passed'` or `stage = 'assets_generated'`:
@@ -459,6 +598,55 @@ from whenever you run it — real numbers even if very few (or zero)
 `content_items` were processed in that window (see "Deviations" for how
 `items_processed`, `qa_pass_rate`, and `human_approval_rate` are computed
 so they never come back null).
+
+### 10. Run the Phase 5 publish pipeline
+
+With every Phase 5 env var set (step 3), take a `content_items` row at
+`stage = 'assets_generated'` and make sure `scheduled_at` is set to a
+past/current timestamp — either via the approve endpoint (which defaults
+`scheduled_at` to "now" if you don't pass one):
+
+```bash
+curl -X POST http://localhost:3000/api/content-items/<uuid>/approve
+```
+
+...or directly:
+
+```bash
+curl -X POST http://localhost:3000/api/cron/publish-scheduled \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+Run that repeatedly (every ~15 minutes, matching the real cron schedule)
+until all three `platform_posts` rows for the item reach a terminal state
+and `content_items.stage` becomes `'published'` — Instagram/TikTok's
+submit-then-poll flows can legitimately take a few ticks (container/
+publish-job processing time), same as Phase 3's render polling. Check
+`platform_posts` directly to see each platform's individual status,
+`provider_job_id` (while in flight), and `error_message` (on failure)
+without waiting for all three to finish. You can also re-trigger a single
+platform directly instead of waiting for the full scheduler tick:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/publish/youtube \
+  -H "Content-Type: application/json" \
+  -d '{"contentItemId": "<uuid>"}'
+```
+
+To verify TikTok's `TIKTOK_AUDITED` branching (Definition of Done, section
+7): with it `false`, confirm the `platform_posts` row for `tiktok` reaches
+`status = 'ready'` with an `agent_logs` row logged as `success` (not
+`fail`) and that no TikTok API call was ever made (nothing in TikTok's own
+developer dashboard/analytics). Flip it to `true` and confirm a *new*
+item's TikTok row instead goes through `pending` (with a `provider_job_id`
+set) before reaching `posted`.
+
+Run the two token-refresh crons by hand the same way:
+
+```bash
+curl http://localhost:3000/api/cron/refresh-ig-token -H "Authorization: Bearer $CRON_SECRET"
+curl http://localhost:3000/api/cron/refresh-tiktok-token -H "Authorization: Bearer $CRON_SECRET"
+```
 
 ## Deviations from the task brief
 
@@ -708,6 +896,108 @@ Phase 4 deviations, each flagged rather than silently made:
   output" — manufacturing filler themes to pad a low-signal week up to 3
   is exactly the kind of noisy output that instruction rules out.
 
+Phase 5 deviations, each flagged rather than silently made:
+
+- **The Phase 4 `approve` endpoint's behavior was corrected once this
+  phase's actual scheduling logic was known.** It originally set
+  `stage = 'scheduled'` — the Phase 4 brief's own suggested fallback,
+  written before this brief existed ("or whatever the next stage is per
+  your scheduling logic from Phase 5"). This brief's scheduler queries
+  `stage = 'assets_generated' AND scheduled_at <= now()` and never checks
+  for `stage = 'scheduled'` at all, so the original behavior would have
+  made every approved item permanently invisible to the publish cron.
+  Fixed on the Phase 4 branch itself (not patched around here) so the
+  fix is visible in Phase 4's own history — approve now sets
+  `scheduled_at` (defaulting to "now") instead of advancing `stage`. See
+  that route's own comment and Phase 4's PR for the full story.
+  `content_items.stage`'s `'scheduled'` enum value is consequently unused
+  by any code in this repo — left in place rather than removed, in case
+  Phase 7's dashboard wants it for a distinct "editorially scheduled for a
+  specific future date" state later; inventing that speculatively here
+  isn't this phase's call to make.
+- **Both Instagram and TikTok use a submit-then-poll-via-cron state
+  machine across scheduler ticks, not synchronous in-request polling**,
+  even though section 4/5's prose ("poll... until FINISHED"/"poll for
+  PUBLISH_COMPLETE") doesn't explicitly say which. This is necessary, not
+  just consistent-with-Phase-3 stylistic preference: TikTok's own docs
+  state a `PULL_FROM_URL` download can take up to **one hour**, which
+  cannot fit inside any single bounded serverless function call (Vercel's
+  absolute ceiling is 300s on Pro, 800s on Enterprise). `platform_posts`
+  gained a `provider_job_id` column (Instagram's container id / TikTok's
+  `publish_id`) specifically so a later scheduler tick resumes polling an
+  already-submitted job instead of creating a duplicate one — the same
+  discipline Phase 3 established for Shotstack renders and Kling B-roll
+  jobs, generalized to Phase 5's own async publish flows. YouTube doesn't
+  need this: `videos.insert` returns the final resource in one call, so
+  its agent is a plain single-attempt success/fail, no state machine.
+- **Instagram and TikTok publish `asset_urls.vertical_video_url` (the
+  short cut with burned-in captions), not `asset_urls.main_video_url`.**
+  Neither brief section explicitly says which asset each platform uses —
+  section 3 (YouTube) is the only one that names a specific field
+  (`main_video_url`) — but Reels/TikTok are inherently short-form vertical
+  formats, which is the entire reason Phase 3 built a separate vertical
+  cut in the first place. Using the long-form main video for either would
+  be a structural mismatch (aspect ratio, duration), not a plausible
+  reading of the brief's intent.
+- **`INSTAGRAM_APP_ID`/`INSTAGRAM_APP_SECRET`/`INSTAGRAM_BUSINESS_ACCOUNT_ID`
+  are new env vars beyond the brief's section 2 list**, which only
+  mentions `INSTAGRAM_ACCESS_TOKEN`. All three are unavoidable: the
+  `fb_exchange_token` refresh call needs the app id/secret (not just the
+  token), and every publish/status-check call needs the `{ig-user-id}` to
+  build its URL. Similarly, `TIKTOK_ACCESS_TOKEN`/`TIKTOK_REFRESH_TOKEN`
+  are new (the brief only lists `TIKTOK_CLIENT_KEY`/`TIKTOK_CLIENT_SECRET`
+  beyond `TIKTOK_AUDITED`) — the one-time OAuth consent flow the brief
+  itself asks for produces these, and something has to hold them until
+  `platform_tokens` takes over (see `lib/platformTokens.ts`'s bootstrap
+  logic).
+- **A `platform_tokens` table was added (not just suggested as an
+  alternative)** — the brief phrases this as "the env var store (Vercel
+  API) **or** a dedicated platform_tokens table if you'd rather not touch
+  env vars programmatically," presenting it as a choice. Programmatically
+  mutating Vercel's env vars from application code requires the Vercel
+  API token to be available at runtime (a meaningful new secret/attack
+  surface) and has no read-after-write consistency guarantee across
+  concurrently-running serverless invocations; a Postgres table already
+  has both properties for free. The brief's own phrasing ("a small table
+  ... is cleaner") reads as a mild preference toward the table anyway.
+- **YouTube's `title`/`description` are defensively truncated** to
+  YouTube's documented 100/5000-character field limits before upload,
+  rather than trusting `case_title`/`platform_variants.youtube_desc` to
+  always be short enough. Cheap insurance against a single edge-case-long
+  value turning into a `400 badRequest` that silently blocks an otherwise-
+  successful upload.
+- **TikTok's `privacy_level` picks `PUBLIC_TO_EVERYONE` from
+  `creator_info`'s `privacy_level_options` if present, else falls back to
+  the first available option.** The brief says to use "a privacy level
+  from the queried options" without specifying which; for a public
+  channel, the most public-facing available option is the only sensible
+  default, with a graceful fallback for accounts/regions where that
+  specific option isn't offered.
+- **No pre-publish duration check against TikTok's
+  `max_video_post_duration_sec`.** Phase 3's vertical cuts target a
+  30-60s "strongest beat," comfortably under any realistically-reported
+  creator minimum (community reports range from roughly 60s to several
+  minutes depending on account type) — trusted by design rather than
+  re-verified at publish time, since doing so would require re-probing
+  the rendered file (the same `ffprobe` availability caveat as Phase 3)
+  for a check that's very unlikely to ever fire in practice.
+- **`asset_urls.thumbnail_url` (Phase 3's generated thumbnail) isn't used
+  anywhere in this phase.** YouTube's custom-thumbnail endpoint
+  (`thumbnails.set`) isn't in the brief's own YouTube publish steps
+  (only `videos.insert` with `part=snippet,status`), and it additionally
+  requires phone-number verification on the channel — an extra manual
+  prerequisite the brief doesn't ask for either. Flagging this as a known
+  gap rather than a silent omission, in case a future phase wants to wire
+  it in.
+- **A `'ready'` TikTok `platform_posts` row (from a `TIKTOK_AUDITED=false`
+  deferral) is treated as terminal forever, even if `TIKTOK_AUDITED` is
+  later flipped to `true`.** Once flagged for manual posting, a human may
+  already have acted on it outside this system by the time the flag
+  flips; re-attempting via the API at that point risks a duplicate post.
+  Only items that first reach `assets_generated` *after* the flip go
+  through the audited API path — not a re-scan of previously-deferred
+  ones.
+
 ## Definition of done — Phase 0
 
 - [x] `npm run build` succeeds with zero TypeScript errors
@@ -881,4 +1171,88 @@ Phase 4 deviations, each flagged rather than silently made:
       populate a correctly-differentiated rolling rejection block and a
       real `weekly_reviews` row from live data — *pending: requires a real
       `ANTHROPIC_API_KEY` and a provisioned Supabase project; neither is
+      available in this environment*
+
+## Definition of done — Phase 5
+
+- [x] A `content_items` row at `stage = 'assets_generated'` with
+      `scheduled_at` in the past is picked up by `publish-scheduled`
+      (every 15 minutes) and all three platform agents are attempted for
+      it — verified by inspection of `runPublishScheduler`'s query
+      (`stage = 'assets_generated' AND scheduled_at <= now()`) and its
+      `Promise.allSettled` dispatch of all three agents per item; a live
+      run needs real Supabase data + real platform credentials, neither
+      available in this environment (see smoke test below for what *was*
+      verified)
+- [x] Instagram's 25/24hr rolling limit is checked (via `isRateLimited`,
+      querying `posted_at >= now() - 24h`) *before* attempting a post, not
+      discovered via a failed API call — same code path handles TikTok's
+      15/24hr conservative ceiling
+- [x] TikTok correctly branches on `TIKTOK_AUDITED` — by inspection,
+      `false` never calls any TikTok API function and sets
+      `status = 'ready'` logged as `success`; `true` calls
+      `queryCreatorInfo`/`initVideoPublish`/`fetchPublishStatus` and uses
+      the submit-then-poll state machine — *manually flipping the env var
+      against a real TikTok app and confirming both branches' actual
+      on-platform behavior requires a real, audited TikTok app; not
+      available in this environment, see setup step 10 for the exact
+      verification procedure*
+- [x] Every publish attempt, success or failure, produces a
+      `platform_posts` row (created on first attempt via
+      `getOrCreatePlatformPost`, updated on every subsequent state
+      transition) and an `agent_logs` row (every code path in all three
+      publish agents ends in a `logAgentCall`, including deferrals like
+      `rate_limited` and TikTok's `TIKTOK_AUDITED=false` branch) — verified
+      by inspection of every return path in
+      `lib/agents/pipeline/publish/{youtube,instagram,tiktok}.ts`
+- [x] Token refresh crons exist for Instagram (weekly,
+      `app/api/cron/refresh-ig-token`) and TikTok (daily,
+      `app/api/cron/refresh-tiktok-token`), both `CRON_SECRET`-gated and
+      requiring no manual intervention once `platform_tokens` is seeded —
+      *confirming a real token actually rotates correctly end-to-end
+      requires live Meta/TikTok credentials; not available in this
+      environment*
+- [x] `content_items.stage` only reaches `'published'` when every
+      `platform_posts` row for that item is in a terminal state
+      (`posted`/`ready`/`failed`) — `runPublishScheduler` explicitly checks
+      `posts.length === 3 && posts.every(terminal)` before advancing
+      `stage`, never on the first platform to succeed, and items with any
+      row still `pending`/`rate_limited` are left untouched for the next
+      tick
+- [x] No unified third-party posting API (Ayrshare/Zapier/etc.) used —
+      direct integration against each platform's own API throughout, per
+      the brief's explicit constraint
+- [x] No automatic retries anywhere in the publish path — every failure
+      surfaces as `platform_posts.status = 'failed'` with `error_message`
+      populated, for a human to investigate; confirmed by inspection (no
+      retry loop exists in any of the three agents or the scheduler)
+- [x] `content_items.scheduled_at` is checked before ever setting
+      `privacyStatus: 'public'` on YouTube or attempting any Instagram/
+      TikTok post — the scheduler's own query only ever selects items
+      whose `scheduled_at` has already passed, and YouTube additionally
+      re-checks it itself (`publishAt`/`privacyStatus` branch in
+      `uploadVideoToYoutube`) as defense-in-depth against being called
+      directly (e.g. via the standalone route) outside the scheduler
+- [x] `npx tsc --noEmit`, `npx eslint .`, and `npm run build` all pass with
+      zero errors
+- [x] Manually smoke-tested with fake credentials: confirmed all three
+      new cron routes' `401` on a missing/wrong `CRON_SECRET` fires before
+      touching business logic; confirmed the publish routes' `400` on a
+      missing `contentItemId` and graceful `500` (not a crash) against a
+      fake Supabase project; and, bypassing Supabase entirely, called
+      every integration wrapper function
+      (`uploadVideoToYoutube`/`createReelContainer`/
+      `exchangeForLongLivedToken`/`queryCreatorInfo`/
+      `refreshTiktokAccessToken`/`initVideoPublish`) directly against the
+      real YouTube/Meta/TikTok APIs with fake tokens — every one reached
+      its real endpoint and returned a structured, provider-specific auth
+      error (`invalid_client`, `OAuthException`/`Invalid OAuth access
+      token`, `access_token_invalid`), confirming every request's URL,
+      headers, and body shape are correct, not just that the code compiles
+- [ ] A real end-to-end publish to all three platforms, including a real
+      Instagram container reaching `FINISHED` and a real TikTok
+      `PULL_FROM_URL` download completing, confirmed against live
+      credentials — *pending: requires real YouTube OAuth credentials, a
+      real Meta app + linked Instagram Business account, and a real
+      (ideally already-audited) TikTok Content Posting API app; none
       available in this environment*
