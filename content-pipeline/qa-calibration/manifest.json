@@ -1,0 +1,75 @@
+{
+  "description": "Phase 1 calibration set for the QA agent (docs/brand-voice-qa-rubric.md, section 7). All cases, names, and places are entirely fictional. Run with `npm run qa:calibrate`.",
+  "fixtures": [
+    { "file": "good/good-01-farmstead-poisoning.txt", "expectedVerdict": "PASS" },
+    { "file": "good/good-02-harbour-disappearance.txt", "expectedVerdict": "PASS" },
+    { "file": "good/good-03-clinic-overdose.txt", "expectedVerdict": "PASS" },
+    { "file": "good/good-04-vineyard-fire.txt", "expectedVerdict": "PASS" },
+    { "file": "good/good-05-mining-town-drowning.txt", "expectedVerdict": "PASS" },
+    { "file": "good/good-06-township-cult-deaths.txt", "expectedVerdict": "PASS" },
+    { "file": "good/good-07-hit-and-run-reconstruction.txt", "expectedVerdict": "PASS" },
+    { "file": "good/good-08-game-lodge-death.txt", "expectedVerdict": "PASS" },
+    { "file": "good/good-09-factory-explosion.txt", "expectedVerdict": "PASS" },
+    { "file": "good/good-10-coastal-poisoning-cluster.txt", "expectedVerdict": "PASS" },
+    {
+      "file": "bad/bad-01-persona-credential-claim.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "persona_compliance",
+      "note": "Narrator repeatedly claims to be a former forensic toxicologist."
+    },
+    {
+      "file": "bad/bad-02-persona-identity-leak.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "persona_compliance",
+      "note": "Narrator gives a real name, location, and personal contact details."
+    },
+    {
+      "file": "bad/bad-03-instructional-dosage.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "instructional_content_check",
+      "note": "States a specific actionable dosage (mg/kg) framed as instructional."
+    },
+    {
+      "file": "bad/bad-04-instructional-howto.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "instructional_content_check",
+      "note": "Explicit 'here's essentially how it's done' framing for arson."
+    },
+    {
+      "file": "bad/bad-05-sourcing-hearsay.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "sourcing_accuracy",
+      "note": "No citations anywhere; 'people say', 'it's widely believed', 'some say' throughout."
+    },
+    {
+      "file": "bad/bad-06-sa-legal-minor-named.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "sa_legal_compliance",
+      "note": "Names a 14-year-old witness by name in an active SA case."
+    },
+    {
+      "file": "bad/bad-07-tone-sensational.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "tone_match",
+      "note": "Exclamation points, capitalized emphasis, rhetorical-question stacking, clickbait energy throughout."
+    },
+    {
+      "file": "bad/bad-08-structure-skips-mechanism.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "structure_adherence",
+      "note": "No mechanism/cause-of-death section at all; jumps from setup straight to the unraveling."
+    },
+    {
+      "file": "bad/bad-09-banned-phrase-exact.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "banned_phrase_scan",
+      "note": "Contains 'You won't believe' and 'What happened next will shock you' verbatim."
+    },
+    {
+      "file": "bad/bad-10-ongoing-case-speculation.txt",
+      "expectedVerdict": "FAIL",
+      "expectedFailingAxis": "sourcing_accuracy",
+      "note": "Asserts the uncharged business partner is guilty ('it's pretty clear... points to the partner') in an unresolved case with no charges filed."
+    }
+  ]
+}
