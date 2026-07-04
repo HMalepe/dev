@@ -1,0 +1,14 @@
+# Core dependencies (always required)
+click>=8.1
+python-dotenv>=1.0
+
+# Optional integrations - uncomment what you need, or `pip install -e ".[all]"`
+# openai>=1.30        # AI content generation (falls back to offline templates if omitted)
+# tweepy>=4.14        # Twitter/X publishing
+# requests>=2.31      # LinkedIn publishing
+# APScheduler>=3.10   # Cron-style scheduling (a simple polling scheduler is included by default)
+
+# Dev/test tooling
+pytest>=8.0
+pytest-cov>=5.0
+ruff>=0.5

@@ -1,0 +1,16 @@
+[
+  {
+    "topic": "productivity tips for remote teams",
+    "platform": "twitter",
+    "tone": "friendly",
+    "hashtags": ["#RemoteWork", "#Productivity"],
+    "interval_minutes": 1440
+  },
+  {
+    "topic": "lessons learned building AI products",
+    "platform": "linkedin",
+    "tone": "professional",
+    "hashtags": ["#AI", "#BuildInPublic"],
+    "interval_minutes": 4320
+  }
+]
