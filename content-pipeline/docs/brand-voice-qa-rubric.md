@@ -95,7 +95,7 @@ reject.**
 | SA legal compliance | No naming of restricted minors/victims/witnesses | Any identifying detail on a legally restricted individual |
 | Tone match | Calm, detached, matter-of-fact | Sensationalized, exclamatory, clickbait tone |
 | Structure adherence | Hits all 6 beats in order | Skips mechanism section or buries it |
-| Banned phrase scan | Clean | Contains any list-4 phrase |
+| Banned phrase scan | Clean | Contains any list-5 phrase |
 
 The QA agent prompt returns **PASS / FAIL + specific axis + one-sentence
 reason**. No silent rejections — every fail needs a reason a draft agent
