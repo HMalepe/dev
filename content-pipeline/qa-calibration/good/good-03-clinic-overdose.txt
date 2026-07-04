@@ -1,0 +1,11 @@
+A private clinic in Nelspruit reported a patient death that, on paper, looked like a routine post-operative complication. The inquest found otherwise.
+
+Thabo Mokoena, forty-four, was admitted for a minor day procedure and was found unresponsive in recovery six hours later. The attending clinic initially recorded the cause as a cardiac event, according to the discharge summary submitted to the inquest.
+
+The mechanism, established through the forensic toxicologist's testimony at the inquest, was a documented anaesthetic dosing error: the concentration recorded on the anaesthetic chart did not match the concentration later found in post-mortem blood samples, a discrepancy the pathologist described on record as inconsistent with the standard protocol for that procedure. The inquest record notes that the recovery room was, per the clinic's own staffing log, operating with one nurse covering two wards that evening.
+
+The unraveling came from the anaesthetic machine's own digital log, which — according to the inquest findings — recorded a manual override of the automated dosing safeguard at a time that did not correspond to any charted adjustment by clinical staff.
+
+The inquest returned an open verdict, and the matter was referred for further regulatory review. Its current status is noted in the health ombudsman's published case list.
+
+New cases post weekly — subscribe if you'd like this one in your feed.
