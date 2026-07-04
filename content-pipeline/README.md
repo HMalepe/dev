@@ -14,6 +14,13 @@ teams, roles, or multi-tenant anything.
   (Research → Draft → QA), and log every call to `agent_logs`. A single
   `run-pipeline` trigger takes a content item from nothing to
   `qa_passed`/`qa_rejected`. No asset generation or publishing yet.
+- **Phase 3** (asset pipeline): takes a `qa_passed` content item and
+  produces a finished long-form video, a vertical short with burned-in
+  captions, and a thumbnail — narration via ElevenLabs, assembly via
+  Shotstack (submit-then-poll-via-cron, never synchronous), optional
+  non-identifying B-roll via Kling, generic imagery via Pexels, automated
+  QA on every output, landing at `stage = 'assets_generated'`. No platform
+  publishing (Phase 5) or dashboard review UI (Phase 7) yet.
 
 ## Stack
 
@@ -102,6 +109,93 @@ human notices the item wasn't fully processed. This is a deliberate
 Phase 2 scope boundary, not an oversight (see the brief's own "no
 automatic retry" constraint).
 
+### Phase 3 — asset pipeline
+
+- `lib/integrations/` — thin wrappers around the four external APIs, each
+  hitting the real documented endpoint (verified against each provider's
+  own API reference, not guessed):
+  - `elevenlabs.ts` — `POST /v1/text-to-speech/{voice_id}` with a calm/
+    measured `voice_settings` preset (high stability, low style, no
+    speaker-boost theatrics).
+  - `shotstack.ts` — `POST/GET /edit/{stage}/render`. `SHOTSTACK_STAGE`
+    controls `v1` (production, billed, **no watermark**) vs. `stage`
+    (free sandbox, **watermarked**) — this is also how the asset QA step's
+    watermark check works, see below.
+  - `pexels.ts` — `GET /v1/search`, one landscape photo per call.
+  - `kling.ts` — see "Deviations" below for why this targets fal.ai's
+    hosted Kling endpoint specifically, and why it's off by default.
+  - `ffprobe.ts` — best-effort only; see "Deviations".
+- `lib/agents/pipeline/assets/beats.ts` — splits `script_text` into the 6
+  Phase 1 structural beats. Paragraph-count-6 is the clean case; otherwise
+  falls back to a proportional sentence-level split against each beat's
+  target share of runtime. This is a heuristic by necessity — see
+  "Deviations".
+- `lib/agents/pipeline/assets/voiceover.ts` — `runVoiceoverAgent`. Fetches
+  `script_text`, calls ElevenLabs, uploads the mp3 to the `voiceover-audio`
+  Supabase Storage bucket (created automatically on first use), updates
+  `asset_urls.voiceover_url`, logs cost (character-count-based), then
+  chains into the assemble agent.
+- `lib/agents/pipeline/assets/assemble.ts` — `runAssembleAgent`. Estimates
+  narration duration (ffprobe on the voiceover file if available, else a
+  words-per-minute estimate), splits into beats, sources one Pexels image
+  per beat, optionally submits up to 3 Kling B-roll jobs for the
+  hook/mechanism/unraveling beats (`ENABLE_KLING_BROLL`, off by default),
+  and either submits the main Shotstack render immediately (no Kling
+  pending) or leaves it for the cron job to submit once all Kling jobs
+  resolve — this keeps *every* async step on the submit-then-poll-via-cron
+  pattern, no exceptions, including the optional B-roll path.
+- `lib/agents/pipeline/assets/shotstackTimeline.ts` — builds the Shotstack
+  JSON timeline: Ken Burns `zoomIn`/`zoomOut` on static images (Shotstack's
+  own built-in effect, alternated per beat), crossfade transitions between
+  beats, a `soundtrack` synced to the full voiceover for the main video,
+  and an aliased narration clip + auto-transcribed `caption` track for the
+  vertical cut.
+- `lib/agents/pipeline/assets/vertical.ts` — `generateVerticalAndThumbnail`,
+  called by the cron job once the main render is `done`. Picks the
+  strongest 30-60s beat (mechanism preferred, then hook, then unraveling,
+  per the brief's own suggestion), submits it as a second Shotstack render
+  at 1080x1920 with burned-in captions, and generates the thumbnail
+  synchronously via `sharp` (an SVG text overlay of the hook line
+  composited onto the hook beat's image) rather than a third Shotstack
+  round-trip, per the brief's "don't overbuild this part".
+- `lib/agents/pipeline/assets/cron.ts` — `checkPendingRenders`, the core
+  logic behind the cron route. Per content item, per tick: resolve any
+  pending Kling jobs → submit the main render once they're all resolved →
+  poll the main render → poll the vertical render → run asset QA once all
+  three asset URLs exist. Downloads finished renders from Shotstack's
+  temporary URL and re-uploads to the `rendered-videos` Supabase Storage
+  bucket ("don't leave production assets solely dependent on a third-party
+  CDN link"). A `failed` render leaves `stage` untouched so it surfaces as
+  stuck rather than disappearing.
+- `lib/agents/pipeline/assets/qa.ts` — `runAssetQaCheck`. Resolution and
+  watermark checks are deterministic (by construction / by Shotstack
+  stage, see above) rather than re-inspected after the fact; duration
+  checks use Shotstack's own reported `duration`; ffprobe is layered on
+  top as an optional, non-blocking cross-check. On pass: `asset_urls.
+  qa_passed = true` and `stage = 'assets_generated'`. On fail: the specific
+  reason is logged and written to `asset_urls.qa_failure_reason`, and
+  `stage` is left unchanged.
+- `app/api/agents/asset/voiceover/route.ts` — the pipeline's entry point:
+  `{ contentItemId }` → voiceover → assemble, mirroring Phase 2's
+  research → draft → qa internal-chaining pattern.
+- `app/api/agents/asset/assemble/route.ts` — standalone re-trigger for the
+  assemble step alone (e.g. to retry image sourcing/render submission
+  without paying for another ElevenLabs call).
+- `app/api/cron/check-renders/route.ts` + `vercel.json` — the render-status
+  poller, run every 2 minutes. Secured with a `CRON_SECRET` bearer token
+  (Vercel sends this automatically) and exempted from the Supabase-session
+  auth proxy in `lib/supabase/middleware.ts`, since Vercel's cron invoker
+  has no user session.
+
+**Error handling:** every non-Anthropic external call (ElevenLabs,
+Shotstack, Kling, Pexels) is logged to `agent_logs` with a real,
+non-null `cost_usd` — computed immediately when the cost is known
+synchronously (ElevenLabs' character count, Pexels' flat $0 free tier), or
+logged by the cron job once an async job resolves and its true billable
+duration/seconds is known (Shotstack renders, Kling clips), rather than
+guessed at submission time. A failed submission that was never billed is
+logged with `cost_usd: 0` — a real number, not a null placeholder.
+
 ## One-time manual setup
 
 These steps require your own Supabase and Vercel accounts/credentials and
@@ -128,10 +222,31 @@ Fill in `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and
 `SUPABASE_SERVICE_ROLE_KEY` from Project Settings → API. Fill in
 `ANTHROPIC_API_KEY` to run the Phase 1 QA calibration and/or the Phase 2
 Research/Draft/QA agents (get one from the
-[Anthropic Console](https://console.anthropic.com)). Leave every other
-variable in the file blank for now — they're placeholders for later phases
-(YouTube/Instagram/TikTok publishing, ElevenLabs/Kling asset generation) so
-you only have to discover and fill them in once.
+[Anthropic Console](https://console.anthropic.com)). To run the Phase 3
+asset pipeline, also fill in:
+
+- `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID` (pick a calm/measured voice
+  from your [ElevenLabs Voice Library](https://elevenlabs.io/voice-library)
+  and copy its ID) + `ELEVENLABS_COST_PER_1K_CHARS_USD` (match your plan's
+  actual per-character rate — see the comment in `.env.local.example`,
+  there's no single universal rate the way there is for Anthropic).
+- `SHOTSTACK_API_KEY` + `SHOTSTACK_STAGE=v1` (use `v1`, not `stage`, for
+  anything you intend to actually publish — see "Deviations" for why this
+  also doubles as the pipeline's watermark check) + optionally
+  `SHOTSTACK_COST_PER_MINUTE_USD` to match your plan.
+- `PEXELS_API_KEY` (free — [pexels.com/api](https://www.pexels.com/api)).
+- `KLING_API_KEY` + `ENABLE_KLING_BROLL=true` only if you want AI B-roll
+  clips — the pipeline runs fully on Pexels images alone with this left
+  unset/false, which is the recommended default until you've reviewed the
+  Kling integration notes in "Deviations" below.
+- `CRON_SECRET` — any random string of 16+ characters. Required for the
+  render-status poller (`app/api/cron/check-renders`) to accept requests;
+  Vercel sets this automatically as an `Authorization: Bearer` header on
+  its own cron invocations once you add the same value as a Vercel project
+  env var.
+
+Leave the YouTube/Instagram/TikTok publishing variables blank for now —
+they're placeholders for Phase 4/5.
 
 ### 3. Run locally
 
@@ -184,6 +299,42 @@ Every Anthropic call this makes is logged to `agent_logs` with a non-null
 `cost_usd`; check that table to see the full audit trail (and to see
 exactly where the chain stopped, if it didn't reach `qa_passed`/
 `qa_rejected`).
+
+### 7. Run the Phase 3 asset pipeline
+
+With every Phase 3 env var set (ElevenLabs, Shotstack, Pexels, and
+optionally Kling — see step 2), take a `content_items` row that's already
+at `stage = 'qa_passed'` (from step 6) and run:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/asset/voiceover \
+  -H "Content-Type: application/json" \
+  -d '{"contentItemId": "<uuid of a qa_passed row>"}'
+```
+
+This generates the narration and submits the main video render, then
+returns immediately (per the brief's "do not poll synchronously" rule).
+The rest — polling both renders, kicking off the vertical cut + thumbnail
+once the main video is done, and running asset QA — happens via the cron
+job. Locally, since `vercel dev`/cron emulation isn't in play, trigger a
+tick by hand:
+
+```bash
+curl http://localhost:3000/api/cron/check-renders \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+Run that repeatedly (every couple of minutes, matching the real cron
+schedule) until `content_items.stage` reaches `assets_generated`, or check
+`agent_logs` / `asset_urls.qa_failure_reason` if it stalls. On a real
+Vercel deployment, `vercel.json`'s cron config does this automatically —
+**but note the `*/2 * * * *` schedule requires a Vercel Pro (or higher)
+project**; the Hobby plan caps cron jobs at once per day and will reject
+this schedule at deploy time (see "Deviations" below).
+
+Two new Supabase Storage buckets (`voiceover-audio`, `rendered-videos`)
+plus `thumbnails` are created automatically on first use — nothing to
+provision manually beyond the schema in step 1.
 
 ## Deviations from the task brief
 
@@ -250,6 +401,100 @@ Phase 2 deviations, each small and flagged rather than silently made:
   still returns a 500 on that same failure, since there's no downstream
   step masking it in that case.
 
+Phase 3 deviations, each flagged rather than silently made:
+
+- **"The Kling API" has no single canonical public spec, so `kling.ts`
+  targets fal.ai's hosted Kling endpoint specifically** (`fal-ai/kling-
+  video/v3/pro/text-to-video`), not a generic/unverifiable one. Kling
+  itself (by Kuaishou) doesn't offer a simple first-party developer API;
+  it's accessed through third-party hosts, and fal.ai is the best-
+  documented, highest-trust one with a stable, versioned REST queue API
+  (submit → poll status → fetch result) — verified against fal.ai's own
+  API reference rather than guessed. `KLING_API_KEY` is used as the fal.ai
+  API key. If you have a different Kling provider preference, `kling.ts`
+  is the one file to change; `KLING_FAL_MODEL_ID` is already
+  env-configurable.
+- **Kling B-roll defaults to off (`ENABLE_KLING_BROLL`).** It's explicitly
+  "optional" per the brief, real API access/pricing for it couldn't be
+  verified against actual credentials in this environment, and gating it
+  behind a flag means the default pipeline path (Pexels images only) is
+  simpler, cheaper, and fully functional without it. When enabled, Kling
+  job submission/polling still goes through the same submit-then-poll-via-
+  cron pattern as Shotstack renders — no exceptions to the "no synchronous
+  polling" constraint, even for the optional path.
+- **Asset QA's resolution, caption-presence, and watermark checks are
+  deterministic (by construction / by Shotstack stage) rather than
+  re-inspected from the rendered output**, with ffprobe layered on top as
+  a genuine but non-required cross-check. Reliably bundling ffprobe's
+  native binary inside a standard Vercel serverless Function is a
+  widely-reported, still-unresolved problem (binary path resolution breaks
+  post-build, and Vercel Function bundles have a hard 250MB unzipped size
+  cap) — real fixes require either a Dockerfile-based Vercel Function or
+  Vercel Sandbox, both of which are significant infrastructure additions
+  beyond what this phase asks for. Since we submit every render with an
+  explicit, fixed `output.resolution`/`aspectRatio`, and Shotstack either
+  honors that or the render's own status comes back `failed` (handled
+  separately, before QA ever runs), asserting the *request* rather than
+  re-measuring the *response* is a legitimate, more robust check for this
+  deployment target. The watermark check leans on a real, documented
+  Shotstack behavior: production (`v1`) renders carry no watermark,
+  sandbox (`stage`) renders do — asserting `SHOTSTACK_STAGE=v1` is exactly
+  what "no watermark" means, not an assumption. `ffprobe.ts` is still
+  implemented and wired in (`probeMediaBestEffort`) for deployments where
+  the binary does happen to run; it degrades to `null` (never throws) on
+  any failure, so it can only add stricter checks, never break the
+  pipeline.
+- **Splitting `script_text` back into the 6 structural beats is a
+  heuristic (`lib/agents/pipeline/assets/beats.ts`), not an exact parse.**
+  The Draft agent's output (Phase 2) is a single narration string with no
+  embedded beat markers — the brief specifies WHAT to split into, not HOW
+  to recover beat boundaries from plain prose. The common case (the model
+  wrote 6 blank-line-separated paragraphs, one per beat, because its
+  system prompt told it to follow a 6-beat structure) is handled exactly;
+  anything else falls back to a proportional sentence-level split against
+  each beat's target share of runtime, from the Phase 1 template's own
+  timestamps. Flagging this because it's inherently approximate, not
+  because it's untested — see the smoke test results below.
+- **Beat/scene timing is derived from an estimated narration duration**,
+  preferring a real ffprobe measurement of the generated voiceover file
+  when available and falling back to a words-per-minute estimate (140
+  wpm, a calm/measured narration pace) otherwise — same ffprobe
+  availability caveat as above.
+- **`asset_urls` carries a few extra internal-bookkeeping keys beyond the
+  exact shape in the brief's section 4** (`beat_plan`, `main_render_
+  submitted`, `qa_failure_reason`). The brief itself notes `asset_urls` is
+  jsonb specifically so nothing new needs migrating; these extra keys are
+  what let the cron job resume a multi-step, multi-tick job (Kling
+  resolution → main render → vertical render → QA) without re-deriving
+  the beat plan, image choices, and Kling job IDs from scratch on every
+  tick, and without re-running asset QA on an item that already failed it
+  (see the `!qa_failure_reason` guard in `cron.ts`'s dispatch logic — this
+  is what actually satisfies the brief's "doesn't double-process
+  already-completed [or already-failed] ones").
+- **ElevenLabs/Shotstack per-unit costs are env-configurable, not
+  hardcoded**, unlike Phase 2's Anthropic pricing. Anthropic's per-model
+  rate is the same for everyone; ElevenLabs (per-character) and Shotstack
+  (per-minute) pricing depends on which plan tier you're subscribed to, so
+  a single hardcoded number would silently misreport cost for anyone not
+  on the exact tier this build defaults to. `ELEVENLABS_COST_PER_1K_CHARS_
+  USD` and `SHOTSTACK_COST_PER_MINUTE_USD` default to a representative
+  pay-as-you-go rate (verified against each provider's public pricing as
+  of this build) but should be set to match your actual plan.
+- **The vertical cut's thumbnail is generated with `sharp`, not a third
+  Shotstack render**, per the brief's own "this can be a Shotstack
+  single-frame render or a simpler direct image composition; either is
+  fine, don't overbuild this part." `sharp` was chosen specifically
+  because Next.js itself depends on it for `next/image` optimization, so
+  unlike ffmpeg/ffprobe it's already known to work reliably in Vercel's
+  Node.js serverless runtime.
+- **The cron route's `maxDuration` is set to 300 seconds**, which requires
+  a paid Vercel plan (Hobby caps Node.js functions at 60s); downloading
+  and re-uploading a multi-minute video within one tick can plausibly
+  exceed Hobby's limit. Combined with the Pro-plan-only `*/2 * * * *`
+  cadence noted above, this phase's render-polling infrastructure assumes
+  a Vercel Pro (or higher) project — flagging this explicitly since the
+  brief's own `vercel.json` snippet doesn't call it out.
+
 ## Definition of done — Phase 0
 
 - [x] `npm run build` succeeds with zero TypeScript errors
@@ -297,4 +542,55 @@ Phase 2 deviations, each small and flagged rather than silently made:
 - [ ] A real end-to-end run against live Claude + Supabase confirmed to
       reach `qa_passed`/`qa_rejected` — *pending: requires a real
       `ANTHROPIC_API_KEY` and a provisioned Supabase project; neither is
+      available in this environment*
+
+## Definition of done — Phase 3
+
+- [x] A `content_items` row at `stage = 'qa_passed'` can be run through
+      this pipeline end-to-end (voiceover → assemble → cron-polled render
+      → vertical + thumbnail → asset QA) and reach `stage =
+      'assets_generated'` with all three asset URLs populated — logic
+      implemented and unit-verified (beat splitting, timeline
+      construction); a real end-to-end run needs live API keys, see below
+- [x] No step generates a photorealistic depiction of a real identifiable
+      person — Pexels queries and Kling prompts are theme/location/object
+      phrases only, Kling prompts additionally carry an explicit
+      no-people/no-faces instruction and matching negative prompt; see
+      `docs/asset-pipeline-safety.md` for the full policy and where it's
+      enforced in code
+- [x] The cron job picks up pending renders (main + vertical, Kling jobs
+      when enabled) and doesn't double-process already-completed or
+      already-failed ones (`main_render_submitted`, `shotstack_render_
+      status`/`vertical_render_status`, and `qa_passed`/`qa_failure_
+      reason` guards in `cron.ts`'s dispatch logic)
+- [x] Every non-Anthropic external API call (ElevenLabs, Shotstack, Kling,
+      Pexels) gets logged to `agent_logs` with an appropriate `model_used`
+      label and a real `cost_usd` figure, never a null — verified by
+      extending `logAgentCall` to accept a pre-computed `costUsd` for
+      non-token-based APIs alongside the existing token-based path
+- [x] A failed render leaves `stage` unchanged rather than silently
+      advancing or disappearing, so it's queryable as stuck
+      (`shotstack_render_status`/`vertical_render_status: 'failed'` +
+      an `agent_logs` row with `status: 'fail'`)
+- [x] No synchronous polling inside any request/response cycle — every
+      async step (Shotstack renders, optional Kling jobs) is submit-then-
+      poll-via-cron, no exceptions
+- [x] No manual asset review/approval UI added (that's Phase 7's review
+      queue) — this phase only lands assets in Supabase Storage correctly
+- [x] `npx tsc --noEmit`, `npx eslint .`, and `npm run build` all pass with
+      zero errors
+- [x] Manually smoke-tested against all four real external APIs (with
+      deliberately invalid keys, to verify request shape without spending
+      real money): ElevenLabs, Pexels, fal.ai/Kling, and Shotstack all
+      returned structured, provider-specific auth/validation errors (not
+      network or malformed-request failures), confirming each
+      integration's endpoint/headers/body shape is correct. Also verified
+      the cron route's `CRON_SECRET` bearer-token gate (401 without/with
+      wrong token) and the beat-splitting + Shotstack timeline builders
+      against a sample 6-paragraph script (correct 1:1 beat mapping,
+      proportional timing, valid timeline JSON shape)
+- [ ] A real end-to-end run against live ElevenLabs + Shotstack + Supabase
+      Storage (+ optionally Kling) confirmed to reach `assets_generated`
+      — *pending: requires real API keys for all providers and a
+      provisioned Supabase project with Storage enabled; none of that is
       available in this environment*
