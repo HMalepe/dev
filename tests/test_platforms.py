@@ -64,6 +64,9 @@ def test_youtube_dry_run_short_circuits(settings, tmp_path):
 
 def test_youtube_requires_media_when_live(settings, monkeypatch):
     monkeypatch.setenv("PIPELINE_DRY_RUN", "false")
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "test-client-secret")
+    monkeypatch.setenv("YOUTUBE_REFRESH_TOKEN", "test-refresh-token")
     from ai_social_pipeline.config import Settings
 
     live_settings = Settings()
