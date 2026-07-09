@@ -14,6 +14,7 @@ venv/
 # Pipeline runtime data (keep the .example files, ignore generated data)
 data/*.db
 data/content_queue.json
+data/scheduler_state.json
 drafts/*.json
 
 # Test / tooling

@@ -50,13 +50,15 @@ def test_history_ignores_non_posted_status(settings):
 
 def test_draft_store_roundtrip(settings):
     drafts = DraftStore(settings.drafts_dir)
-    content = _content("draft me")
+    content = PostContent(topic="topic", platform="mock", text="draft me", media_path="clip.mp4", title="Title")
 
     draft_id = drafts.save(content)
     assert draft_id in drafts.list_drafts()
 
     loaded = drafts.load(draft_id)
     assert loaded.text == content.text
+    assert loaded.media_path == content.media_path
+    assert loaded.title == content.title
 
     drafts.delete(draft_id)
     assert draft_id not in drafts.list_drafts()

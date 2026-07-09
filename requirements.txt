@@ -5,7 +5,7 @@ python-dotenv>=1.0
 # Optional integrations - uncomment what you need, or `pip install -e ".[all]"`
 # openai>=1.30        # AI content generation (falls back to offline templates if omitted)
 # tweepy>=4.14        # Twitter/X publishing
-# requests>=2.31      # LinkedIn publishing
+# requests>=2.31      # LinkedIn, YouTube, TikTok publishing
 # APScheduler>=3.10   # Cron-style scheduling (a simple polling scheduler is included by default)
 
 # Dev/test tooling

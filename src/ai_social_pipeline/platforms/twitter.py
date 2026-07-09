@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..content_generator import PostContent
 from .base import Platform, PublishResult
+from .media import media_kind, resolve_media_path
 
 
 class TwitterPlatform(Platform):
@@ -29,13 +30,34 @@ class TwitterPlatform(Platform):
             )
 
         try:
+            media_ids: list[str] = []
+            media_path, media_error = resolve_media_path(content.media_path)
+            if media_error:
+                return PublishResult(success=False, error=media_error)
+
+            if media_path is not None:
+                if media_kind(media_path) != "image":
+                    return PublishResult(
+                        success=False,
+                        error="Twitter/X media upload currently supports images only. Use YouTube or TikTok for video.",
+                    )
+                auth = tweepy.OAuth1UserHandler(
+                    consumer_key=self._settings.twitter_api_key,
+                    consumer_secret=self._settings.twitter_api_secret,
+                    access_token=self._settings.twitter_access_token,
+                    access_token_secret=self._settings.twitter_access_secret,
+                )
+                api_v1 = tweepy.API(auth)
+                uploaded = api_v1.media_upload(filename=str(media_path))
+                media_ids = [str(uploaded.media_id)]
+
             client = tweepy.Client(
                 consumer_key=self._settings.twitter_api_key,
                 consumer_secret=self._settings.twitter_api_secret,
                 access_token=self._settings.twitter_access_token,
                 access_token_secret=self._settings.twitter_access_secret,
             )
-            response = client.create_tweet(text=content.full_text)
+            response = client.create_tweet(text=content.full_text, media_ids=media_ids or None)
             tweet_id = str(response.data.get("id")) if response and response.data else None
             return PublishResult(success=True, external_id=tweet_id)
         except Exception as exc:  # noqa: BLE001 - surface any API error to the caller

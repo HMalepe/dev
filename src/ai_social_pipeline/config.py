@@ -63,6 +63,15 @@ class Settings:
     linkedin_access_token: str | None = field(default_factory=lambda: os.getenv("LINKEDIN_ACCESS_TOKEN"))
     linkedin_author_urn: str | None = field(default_factory=lambda: os.getenv("LINKEDIN_AUTHOR_URN"))
 
+    youtube_client_id: str | None = field(default_factory=lambda: os.getenv("YOUTUBE_CLIENT_ID"))
+    youtube_client_secret: str | None = field(default_factory=lambda: os.getenv("YOUTUBE_CLIENT_SECRET"))
+    youtube_refresh_token: str | None = field(default_factory=lambda: os.getenv("YOUTUBE_REFRESH_TOKEN"))
+    youtube_privacy_status: str = field(default_factory=lambda: os.getenv("YOUTUBE_PRIVACY_STATUS", "public"))
+    youtube_category_id: str = field(default_factory=lambda: os.getenv("YOUTUBE_CATEGORY_ID", "22"))
+
+    tiktok_access_token: str | None = field(default_factory=lambda: os.getenv("TIKTOK_ACCESS_TOKEN"))
+    tiktok_privacy_level: str = field(default_factory=lambda: os.getenv("TIKTOK_PRIVACY_LEVEL", "PUBLIC_TO_EVERYONE"))
+
     auto_approve: bool = field(default_factory=lambda: _bool_env("PIPELINE_AUTO_APPROVE", False))
     dry_run: bool = field(default_factory=lambda: _bool_env("PIPELINE_DRY_RUN", True))
 

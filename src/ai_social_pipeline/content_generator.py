@@ -17,6 +17,8 @@ class PostContent:
     platform: str
     text: str
     hashtags: list[str] = field(default_factory=list)
+    media_path: str | None = None
+    title: str | None = None
 
     @property
     def full_text(self) -> str:
@@ -27,12 +29,22 @@ class PostContent:
     @property
     def content_hash(self) -> str:
         """Stable fingerprint used for de-duplication in the history store."""
-        return hashlib.sha256(self.full_text.encode("utf-8")).hexdigest()
+        fingerprint = "|".join(
+            [
+                self.full_text,
+                self.media_path or "",
+                self.title or "",
+                self.platform,
+            ]
+        )
+        return hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
 
 
 _PLATFORM_LIMITS = {
     "twitter": 280,
     "linkedin": 3000,
+    "youtube": 5000,
+    "tiktok": 2200,
     "mock": 10_000,
 }
 

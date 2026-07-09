@@ -1,4 +1,4 @@
-from ai_social_pipeline.content_generator import ContentGenerator
+from ai_social_pipeline.content_generator import ContentGenerator, PostContent
 
 
 def test_offline_generation_is_deterministic(settings):
@@ -24,3 +24,17 @@ def test_hashtags_included_in_full_text(settings):
     assert "#Growth" in content.full_text
     assert "#Marketing" in content.full_text
     assert content.text not in content.hashtags
+
+
+def test_content_hash_changes_when_media_attached(settings):
+    generator = ContentGenerator(settings)
+    base = generator.generate(topic="launch", platform="youtube")
+    with_media = PostContent(
+        topic=base.topic,
+        platform=base.platform,
+        text=base.text,
+        hashtags=base.hashtags,
+        media_path="clip-a.mp4",
+    )
+
+    assert base.content_hash != with_media.content_hash

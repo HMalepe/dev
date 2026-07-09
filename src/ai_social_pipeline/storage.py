@@ -113,7 +113,14 @@ class DraftStore:
     def load(self, draft_id: str) -> PostContent:
         path = self._drafts_dir / f"{draft_id}.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-        return PostContent(topic=data["topic"], platform=data["platform"], text=data["text"], hashtags=data.get("hashtags", []))
+        return PostContent(
+            topic=data["topic"],
+            platform=data["platform"],
+            text=data["text"],
+            hashtags=data.get("hashtags", []),
+            media_path=data.get("media_path"),
+            title=data.get("title"),
+        )
 
     def delete(self, draft_id: str) -> None:
         path = self._drafts_dir / f"{draft_id}.json"

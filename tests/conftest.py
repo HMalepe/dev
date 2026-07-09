@@ -18,6 +18,10 @@ def settings(tmp_path, monkeypatch):
         "TWITTER_ACCESS_SECRET",
         "LINKEDIN_ACCESS_TOKEN",
         "LINKEDIN_AUTHOR_URN",
+        "YOUTUBE_CLIENT_ID",
+        "YOUTUBE_CLIENT_SECRET",
+        "YOUTUBE_REFRESH_TOKEN",
+        "TIKTOK_ACCESS_TOKEN",
     ]:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("PIPELINE_AUTO_APPROVE", "false")

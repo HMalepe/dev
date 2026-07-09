@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .config import Settings, get_settings
 from .content_generator import ContentGenerator, PostContent
@@ -51,12 +51,20 @@ class PostingPipeline:
         tone: str = "friendly",
         hashtags: list[str] | None = None,
         auto_publish: bool | None = None,
+        media_path: str | None = None,
+        title: str | None = None,
     ) -> PipelineResult:
         """Generate one piece of content and either publish it or save it as a draft.
 
         ``auto_publish`` overrides ``settings.auto_approve`` when provided.
         """
         content = self.generate(topic=topic, platform=platform, tone=tone, hashtags=hashtags)
+        if media_path is not None or title is not None:
+            content = replace(
+                content,
+                media_path=media_path,
+                title=title or content.title or content.topic,
+            )
 
         if self.history.has_posted(content):
             logger.info("Skipping duplicate content for topic=%r platform=%r", topic, platform)
@@ -102,6 +110,32 @@ class PostingPipeline:
             external_id=result.external_id,
             error=result.error,
         )
+
+    def publish_existing(
+        self,
+        *,
+        topic: str,
+        platform: str,
+        text: str,
+        media_path: str,
+        title: str | None = None,
+        hashtags: list[str] | None = None,
+    ) -> PipelineResult:
+        """Publish pre-made media without running the AI content generator."""
+        content = PostContent(
+            topic=topic,
+            platform=platform,
+            text=text,
+            hashtags=hashtags or [],
+            media_path=media_path,
+            title=title or topic,
+        )
+
+        if self.history.has_posted(content):
+            logger.info("Skipping duplicate media post for topic=%r platform=%r", topic, platform)
+            return PipelineResult(content=content, status="skipped_duplicate")
+
+        return self.publish(content)
 
     def approve_draft(self, draft_id: str) -> PipelineResult:
         content = self.drafts.load(draft_id)
