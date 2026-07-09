@@ -24,14 +24,15 @@ classifiers = [
   "Topic :: Multimedia :: Video",
 ]
 
-[project.urls]
-Homepage = "https://github.com/HMalepe/Automated-social-media-poster"
-Repository = "https://github.com/HMalepe/Automated-social-media-poster"
-Issues = "https://github.com/HMalepe/Automated-social-media-poster/issues"
 dependencies = [
   "click>=8.1",
   "python-dotenv>=1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/HMalepe/Automated-social-media-poster"
+Repository = "https://github.com/HMalepe/Automated-social-media-poster"
+Issues = "https://github.com/HMalepe/Automated-social-media-poster/issues"
 
 [project.optional-dependencies]
 openai = ["openai>=1.30"]
