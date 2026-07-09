@@ -3,7 +3,14 @@ import time
 import pytest
 
 from ai_social_pipeline.content_generator import PostContent
-from ai_social_pipeline.storage import ContentQueue, DraftStore, PostHistory, PostRecord, StorageError, validate_draft_id
+from ai_social_pipeline.storage import (
+    ContentQueue,
+    DraftStore,
+    PostHistory,
+    PostRecord,
+    StorageError,
+    validate_draft_id,
+)
 
 
 def _content(text="hello world"):
