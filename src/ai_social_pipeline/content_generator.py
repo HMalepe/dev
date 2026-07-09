@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import textwrap
 from dataclasses import dataclass, field
 
 from .config import Settings
+
+
+class ContentGenerationError(Exception):
+    """Raised when AI content generation fails."""
 
 
 @dataclass(frozen=True)
@@ -57,53 +62,79 @@ _TEMPLATES = [
 ]
 
 
-class ContentGenerator:
-    """Wraps an LLM provider to draft platform-appropriate post copy.
+def platform_char_limit(platform: str) -> int:
+    return _PLATFORM_LIMITS.get(platform.lower(), 500)
 
-    When no ``OPENAI_API_KEY`` is configured (e.g. local dev, CI, tests), a
-    deterministic offline template is used instead so the rest of the
-    pipeline can still be exercised end-to-end without network access.
-    """
+
+def fit_text_to_platform(text: str, hashtags: list[str], limit: int) -> str:
+    """Trim body text so text + hashtags stay within the platform limit."""
+    if not hashtags:
+        return textwrap.shorten(text, width=limit, placeholder="...")
+
+    hashtag_block = " ".join(hashtags)
+    separator = "\n\n"
+    reserved = len(separator) + len(hashtag_block)
+    if reserved >= limit:
+        return textwrap.shorten(hashtag_block, width=limit, placeholder="...")
+    body_limit = max(1, limit - reserved)
+    return textwrap.shorten(text, width=body_limit, placeholder="...")
+
+
+def _safe_topic_for_template(topic: str) -> str:
+    return topic.replace("{", "{{").replace("}", "}}")
+
+
+class ContentGenerator:
+    """Wraps an LLM provider to draft platform-appropriate post copy."""
 
     def __init__(self, settings: Settings):
         self._settings = settings
 
     def generate(self, topic: str, platform: str = "twitter", tone: str = "friendly", hashtags: list[str] | None = None) -> PostContent:
         platform = platform.lower()
-        limit = _PLATFORM_LIMITS.get(platform, 500)
+        limit = platform_char_limit(platform)
+        tags = hashtags or []
 
         if self._settings.openai_api_key:
-            text = self._generate_with_openai(topic=topic, platform=platform, tone=tone, limit=limit)
+            text = self._generate_with_openai(topic=topic, platform=platform, tone=tone, limit=limit, hashtags=tags)
         else:
-            text = self._generate_offline(topic=topic, limit=limit)
+            text = self._generate_offline(topic=topic, limit=limit, hashtags=tags)
 
-        return PostContent(topic=topic, platform=platform, text=text, hashtags=hashtags or [])
+        return PostContent(topic=topic, platform=platform, text=text, hashtags=tags)
 
-    def _generate_offline(self, topic: str, limit: int) -> str:
+    def _generate_offline(self, topic: str, limit: int, hashtags: list[str]) -> str:
         index = int(hashlib.sha1(topic.encode("utf-8")).hexdigest(), 16) % len(_TEMPLATES)
-        text = _TEMPLATES[index].format(topic=topic)
-        return textwrap.shorten(text, width=limit, placeholder="...")
+        text = _TEMPLATES[index].format(topic=_safe_topic_for_template(topic))
+        return fit_text_to_platform(text, hashtags, limit)
 
-    def _generate_with_openai(self, topic: str, platform: str, tone: str, limit: int) -> str:
+    def _generate_with_openai(self, topic: str, platform: str, tone: str, limit: int, hashtags: list[str]) -> str:
         try:
             from openai import OpenAI
-        except ImportError as exc:  # pragma: no cover - exercised only without the dep installed
+        except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "The 'openai' package is required to generate content with an API key. "
                 "Install it with `pip install openai`, or unset OPENAI_API_KEY to use the "
                 "offline template generator."
             ) from exc
 
+        safe_topic = re.sub(r"[\x00-\x1f\x7f]", " ", topic).strip()
         client = OpenAI(api_key=self._settings.openai_api_key)
         prompt = (
-            f"Write a {tone} social media post for {platform} about: {topic}. "
+            f"Write a {tone} social media post for {platform} about: {safe_topic}. "
             f"Keep it under {limit} characters, no hashtags, no quotation marks."
         )
-        response = client.chat.completions.create(
-            model=self._settings.openai_model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=300,
-            temperature=0.8,
-        )
-        text = response.choices[0].message.content.strip()
-        return textwrap.shorten(text, width=limit, placeholder="...")
+        try:
+            response = client.chat.completions.create(
+                model=self._settings.openai_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
+                temperature=0.8,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ContentGenerationError(f"OpenAI content generation failed: {exc}") from exc
+
+        message = response.choices[0].message.content
+        if not message:
+            raise ContentGenerationError("OpenAI returned an empty response.")
+        text = message.strip()
+        return fit_text_to_platform(text, hashtags, limit)

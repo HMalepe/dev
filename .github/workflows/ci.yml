@@ -28,4 +28,4 @@ jobs:
         run: ruff check src tests
 
       - name: Test
-        run: pytest --cov=ai_social_pipeline --cov-report=term-missing
+        run: pytest

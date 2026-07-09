@@ -1,21 +1,10 @@
-"""Command-line interface for the pipeline.
-
-Examples:
-    python -m ai_social_pipeline generate --topic "AI in marketing" --platform twitter
-    python -m ai_social_pipeline post --topic "AI in marketing" --platform mock --auto-approve
-    python -m ai_social_pipeline post --topic "Launch" --platform youtube --media clip.mp4 --auto-approve
-    python -m ai_social_pipeline publish-media --platform tiktok --media clip.mp4 --text "Caption here"
-    python -m ai_social_pipeline drafts
-    python -m ai_social_pipeline approve --draft-id 1730000000-abcd1234
-    python -m ai_social_pipeline schedule-once
-"""
+"""Command-line interface for the pipeline."""
 
 from __future__ import annotations
 
 import click
 
 from .config import get_settings
-from .content_generator import PostContent
 from .pipeline import PostingPipeline
 from .scheduler import Scheduler
 
@@ -47,7 +36,11 @@ def cli() -> None:
 def generate(topic: str, platform: str, tone: str, hashtags: tuple[str, ...]) -> None:
     """Generate content and print it, without saving or publishing."""
     pipeline = PostingPipeline(get_settings())
-    content = pipeline.generate(topic=topic, platform=platform, tone=tone, hashtags=list(hashtags))
+    try:
+        content = pipeline.generate(topic=topic, platform=platform, tone=tone, hashtags=list(hashtags))
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"Failed to generate content: {exc}", err=True)
+        raise SystemExit(1) from exc
     click.echo(content.full_text)
 
 
@@ -89,6 +82,7 @@ def post(
 @click.option("--title", help="Video title (defaults to topic).")
 @click.option("--topic", default="media post", show_default=True, help="Internal label stored in post history.")
 @click.option("--hashtag", "hashtags", multiple=True, help="Hashtag to append (repeatable).")
+@click.option("--auto-approve/--no-auto-approve", default=True, show_default=True, help="Publish immediately.")
 def publish_media(
     platform: str,
     media_path: str,
@@ -96,6 +90,7 @@ def publish_media(
     title: str | None,
     topic: str,
     hashtags: tuple[str, ...],
+    auto_approve: bool,
 ) -> None:
     """Publish an existing video without AI generation (YouTube, TikTok)."""
     pipeline = PostingPipeline(get_settings())
@@ -106,6 +101,7 @@ def publish_media(
         media_path=media_path,
         title=title,
         hashtags=list(hashtags),
+        auto_publish=auto_approve,
     )
     _echo_result(result)
 
@@ -119,7 +115,11 @@ def drafts() -> None:
         click.echo("No pending drafts.")
         return
     for draft_id in draft_ids:
-        content = pipeline.drafts.load(draft_id)
+        try:
+            content = pipeline.drafts.load(draft_id)
+        except Exception as exc:  # noqa: BLE001
+            click.echo(f"[{draft_id}] <unreadable draft: {exc}>", err=True)
+            continue
         media_note = f" [media: {content.media_path}]" if content.media_path else ""
         click.echo(f"[{draft_id}] ({content.platform}) {content.text}{media_note}")
 
@@ -144,11 +144,15 @@ def history() -> None:
 @cli.command("schedule-once")
 def schedule_once() -> None:
     """Run any due scheduled jobs once and exit (for cron / GitHub Actions)."""
-    scheduler = Scheduler()
-    ran = scheduler.run_due_jobs()
-    if ran:
-        click.echo(f"Ran {len(ran)} job(s): {', '.join(ran)}")
-    else:
+    outcome = Scheduler().run_due_jobs()
+    if outcome.succeeded:
+        click.echo(f"Succeeded ({len(outcome.succeeded)}): {', '.join(outcome.succeeded)}")
+    if outcome.skipped:
+        click.echo(f"Skipped ({len(outcome.skipped)}): {', '.join(outcome.skipped)}")
+    if outcome.failed:
+        click.echo(f"Failed ({len(outcome.failed)}): {', '.join(outcome.failed)}", err=True)
+        raise SystemExit(1)
+    if not outcome.ran_any:
         click.echo("No jobs due.")
 
 

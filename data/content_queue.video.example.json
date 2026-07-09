@@ -1,0 +1,21 @@
+[
+  {
+    "job_id": "youtube-weekly-update",
+    "topic": "weekly product update short",
+    "platform": "youtube",
+    "title": "Weekly Update #1",
+    "text": "Quick update on what we shipped this week. #Shorts",
+    "media_path": "media/weekly-update.mp4",
+    "interval_minutes": 10080,
+    "auto_approve": true
+  },
+  {
+    "job_id": "tiktok-behind-the-scenes",
+    "topic": "behind the scenes clip",
+    "platform": "tiktok",
+    "text": "Behind the scenes of building in public.",
+    "media_path": "media/bts-clip.mp4",
+    "interval_minutes": 10080,
+    "auto_approve": true
+  }
+]

@@ -114,9 +114,15 @@ Everything above works out of the box with **no API keys**: content comes from o
 1. Push this repo to GitHub.
 2. Add secrets in **Settings → Secrets and variables → Actions** (see `.env.example`).
 3. Copy `data/content_queue.example.json` to `data/content_queue.json` and customize.
+   - Each entry should have a stable `job_id` (included in the example).
+   - For video posts, see `data/content_queue.video.example.json`.
 4. The workflow in `.github/workflows/scheduled-posting.yml` runs daily at 09:00 UTC.
 
-Set repository variable `PIPELINE_DRY_RUN=false` when you're ready to post for real.
+**Safe defaults:** scheduled runs use `PIPELINE_DRY_RUN=true` and `PIPELINE_AUTO_APPROVE=false` unless you override repository variables. Scheduler state and post history are cached between runs so `interval_minutes` is honored.
+
+To test manually: **Actions → Scheduled posting → Run workflow** (dry-run defaults to on).
+
+Set repository variable `PIPELINE_DRY_RUN=false` only when you're ready to post for real.
 
 ## Adding a new platform
 
@@ -136,7 +142,7 @@ class MyPlatform(Platform):
 ## Testing
 
 ```bash
-pytest --cov=ai_social_pipeline --cov-report=term-missing
+pytest
 ruff check src tests
 ```
 

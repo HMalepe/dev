@@ -37,6 +37,41 @@ def test_approve_draft_publishes_and_removes_draft(settings):
     assert draft_result.draft_id not in pipeline.drafts.list_drafts()
 
 
+def test_approve_draft_keeps_draft_on_failure(settings, monkeypatch):
+    pipeline = PostingPipeline(settings)
+    draft_result = pipeline.run_once(topic="fail case", platform="mock")
+
+    def fail_publish(content):
+        from ai_social_pipeline.pipeline import PipelineResult
+
+        return PipelineResult(content=content, status="failed", error="boom")
+
+    monkeypatch.setattr(pipeline, "publish", fail_publish)
+
+    result = pipeline.approve_draft(draft_result.draft_id)
+
+    assert result.status == "failed"
+    assert draft_result.draft_id in pipeline.drafts.list_drafts()
+
+
+def test_publish_existing_respects_auto_approve(settings, tmp_path):
+    media_file = tmp_path / "clip.mp4"
+    media_file.write_bytes(b"fake-video")
+
+    pipeline = PostingPipeline(settings)
+    result = pipeline.publish_existing(
+        topic="launch clip",
+        platform="mock",
+        text="caption",
+        media_path=str(media_file),
+        title="Launch",
+        auto_publish=False,
+    )
+
+    assert result.status == "draft"
+    assert result.draft_id in pipeline.drafts.list_drafts()
+
+
 def test_unknown_platform_raises(settings):
     pipeline = PostingPipeline(settings)
 

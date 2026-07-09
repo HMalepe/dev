@@ -11,7 +11,7 @@ try:
     # (e.g. in CI/production where secrets are injected directly).
     from dotenv import load_dotenv
 
-    load_dotenv()
+    load_dotenv(override=False)
 except ImportError:  # pragma: no cover - dotenv is a lightweight dev convenience
     pass
 

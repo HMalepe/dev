@@ -1,7 +1,9 @@
 import time
 
+import pytest
+
 from ai_social_pipeline.content_generator import PostContent
-from ai_social_pipeline.storage import ContentQueue, DraftStore, PostHistory, PostRecord
+from ai_social_pipeline.storage import ContentQueue, DraftStore, PostHistory, PostRecord, StorageError, validate_draft_id
 
 
 def _content(text="hello world"):
@@ -29,9 +31,15 @@ def test_history_dedup(settings):
     assert history.has_posted(content) is True
 
 
-def test_history_ignores_non_posted_status(settings):
+def test_history_stores_media_metadata(settings):
     history = PostHistory(settings.history_db_path)
-    content = _content()
+    content = PostContent(
+        topic="topic",
+        platform="youtube",
+        text="caption",
+        media_path="clip.mp4",
+        title="Title",
+    )
 
     history.record(
         PostRecord(
@@ -39,13 +47,16 @@ def test_history_ignores_non_posted_status(settings):
             topic=content.topic,
             platform=content.platform,
             text=content.full_text,
-            status="failed",
+            status="posted",
             created_at=time.time(),
-            error="boom",
+            media_path=content.media_path,
+            title=content.title,
         )
     )
 
-    assert history.has_posted(content) is False
+    record = history.recent(limit=1)[0]
+    assert record.media_path == "clip.mp4"
+    assert record.title == "Title"
 
 
 def test_draft_store_roundtrip(settings):
@@ -64,11 +75,24 @@ def test_draft_store_roundtrip(settings):
     assert draft_id not in drafts.list_drafts()
 
 
+def test_validate_draft_id_rejects_path_traversal():
+    with pytest.raises(StorageError):
+        validate_draft_id("../../etc/passwd")
+
+
 def test_content_queue_roundtrip(settings):
     queue = ContentQueue(settings.queue_file_path)
     assert queue.load() == []
 
-    entries = [{"topic": "t1", "platform": "mock", "interval_minutes": 30}]
+    entries = [{"job_id": "job-1", "topic": "t1", "platform": "mock", "interval_minutes": 30}]
     queue.save(entries)
 
     assert queue.load() == entries
+
+
+def test_content_queue_rejects_invalid_json(settings):
+    settings.queue_file_path.write_text("{not json", encoding="utf-8")
+    queue = ContentQueue(settings.queue_file_path)
+
+    with pytest.raises(StorageError):
+        queue.load()

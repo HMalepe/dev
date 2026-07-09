@@ -1,4 +1,4 @@
-from ai_social_pipeline.content_generator import ContentGenerator, PostContent
+from ai_social_pipeline.content_generator import ContentGenerator, PostContent, fit_text_to_platform
 
 
 def test_offline_generation_is_deterministic(settings):
@@ -14,7 +14,7 @@ def test_generation_respects_platform_character_limit(settings):
     generator = ContentGenerator(settings)
     content = generator.generate(topic="a" * 500, platform="twitter")
 
-    assert len(content.text) <= 280
+    assert len(content.full_text) <= 280
 
 
 def test_hashtags_included_in_full_text(settings):
@@ -38,3 +38,16 @@ def test_content_hash_changes_when_media_attached(settings):
     )
 
     assert base.content_hash != with_media.content_hash
+
+
+def test_fit_text_to_platform_accounts_for_hashtags():
+    text = fit_text_to_platform("x" * 300, ["#Growth"], limit=280)
+
+    assert len(f"{text}\n\n#Growth") <= 280
+
+
+def test_offline_template_handles_braces_in_topic(settings):
+    generator = ContentGenerator(settings)
+    content = generator.generate(topic="C++ {templates}", platform="twitter")
+
+    assert "{" not in content.text or "C++" in content.text

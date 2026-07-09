@@ -1,33 +1,20 @@
 [
   {
+    "job_id": "twitter-daily-tip",
     "topic": "productivity tips for remote teams",
     "platform": "twitter",
     "tone": "friendly",
     "hashtags": ["#RemoteWork", "#Productivity"],
-    "interval_minutes": 1440
+    "interval_minutes": 1440,
+    "auto_approve": true
   },
   {
+    "job_id": "linkedin-build-in-public",
     "topic": "lessons learned building AI products",
     "platform": "linkedin",
     "tone": "professional",
     "hashtags": ["#AI", "#BuildInPublic"],
-    "interval_minutes": 4320
-  },
-  {
-    "topic": "weekly product update short",
-    "platform": "youtube",
-    "title": "Weekly Update #1",
-    "text": "Quick update on what we shipped this week. #Shorts",
-    "media_path": "media/weekly-update.mp4",
-    "interval_minutes": 10080,
-    "auto_approve": true
-  },
-  {
-    "topic": "behind the scenes clip",
-    "platform": "tiktok",
-    "text": "Behind the scenes of building in public.",
-    "media_path": "media/bts-clip.mp4",
-    "interval_minutes": 10080,
+    "interval_minutes": 4320,
     "auto_approve": true
   }
 ]

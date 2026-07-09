@@ -8,4 +8,4 @@ A small, extensible pipeline that:
   4. Schedules recurring posts and keeps a de-duplicated history.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"

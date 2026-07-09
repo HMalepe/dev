@@ -45,6 +45,11 @@ class YouTubePlatform(Platform):
 
     def publish(self, content: PostContent) -> PublishResult:
         if self._settings.dry_run:
+            media_path, media_error = resolve_media_path(content.media_path)
+            if media_error:
+                return PublishResult(success=False, error=media_error)
+            if media_path is None:
+                return PublishResult(success=False, error="YouTube requires a video file. Pass --media /path/to/video.mp4")
             return PublishResult(success=True, external_id="dry-run")
 
         if not self.is_configured():

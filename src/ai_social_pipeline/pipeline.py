@@ -7,10 +7,10 @@ import time
 from dataclasses import dataclass, replace
 
 from .config import Settings, get_settings
-from .content_generator import ContentGenerator, PostContent
+from .content_generator import ContentGenerationError, ContentGenerator, PostContent
 from .platforms import PLATFORM_REGISTRY
 from .platforms.base import Platform
-from .storage import DraftStore, PostHistory, PostRecord
+from .storage import DraftStore, PostHistory, PostRecord, StorageError
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,22 @@ class PostingPipeline:
             )
         return platform_cls(self.settings)
 
+    def _record(self, content: PostContent, status: str, *, external_id: str | None = None, error: str | None = None) -> None:
+        self.history.record(
+            PostRecord(
+                content_hash=content.content_hash,
+                topic=content.topic,
+                platform=content.platform,
+                text=content.full_text,
+                status=status,
+                created_at=time.time(),
+                external_id=external_id,
+                error=error,
+                media_path=content.media_path,
+                title=content.title,
+            )
+        )
+
     def generate(self, topic: str, platform: str = "twitter", tone: str = "friendly", hashtags: list[str] | None = None) -> PostContent:
         return self.generator.generate(topic=topic, platform=platform, tone=tone, hashtags=hashtags)
 
@@ -54,11 +70,13 @@ class PostingPipeline:
         media_path: str | None = None,
         title: str | None = None,
     ) -> PipelineResult:
-        """Generate one piece of content and either publish it or save it as a draft.
+        """Generate one piece of content and either publish it or save it as a draft."""
+        try:
+            content = self.generate(topic=topic, platform=platform, tone=tone, hashtags=hashtags)
+        except ContentGenerationError as exc:
+            placeholder = PostContent(topic=topic, platform=platform, text="")
+            return PipelineResult(content=placeholder, status="failed", error=str(exc))
 
-        ``auto_publish`` overrides ``settings.auto_approve`` when provided.
-        """
-        content = self.generate(topic=topic, platform=platform, tone=tone, hashtags=hashtags)
         if media_path is not None or title is not None:
             content = replace(
                 content,
@@ -73,16 +91,7 @@ class PostingPipeline:
         should_publish = self.settings.auto_approve if auto_publish is None else auto_publish
         if not should_publish:
             draft_id = self.drafts.save(content)
-            self.history.record(
-                PostRecord(
-                    content_hash=content.content_hash,
-                    topic=content.topic,
-                    platform=content.platform,
-                    text=content.full_text,
-                    status="draft",
-                    created_at=time.time(),
-                )
-            )
+            self._record(content, "draft")
             return PipelineResult(content=content, status="draft", draft_id=draft_id)
 
         return self.publish(content)
@@ -92,18 +101,7 @@ class PostingPipeline:
         result = platform.publish(content)
 
         status = "posted" if result.success else "failed"
-        self.history.record(
-            PostRecord(
-                content_hash=content.content_hash,
-                topic=content.topic,
-                platform=content.platform,
-                text=content.full_text,
-                status=status,
-                created_at=time.time(),
-                external_id=result.external_id,
-                error=result.error,
-            )
-        )
+        self._record(content, status, external_id=result.external_id, error=result.error)
         return PipelineResult(
             content=content,
             status=status,
@@ -120,6 +118,7 @@ class PostingPipeline:
         media_path: str,
         title: str | None = None,
         hashtags: list[str] | None = None,
+        auto_publish: bool | None = None,
     ) -> PipelineResult:
         """Publish pre-made media without running the AI content generator."""
         content = PostContent(
@@ -135,10 +134,29 @@ class PostingPipeline:
             logger.info("Skipping duplicate media post for topic=%r platform=%r", topic, platform)
             return PipelineResult(content=content, status="skipped_duplicate")
 
+        should_publish = self.settings.auto_approve if auto_publish is None else auto_publish
+        if not should_publish:
+            draft_id = self.drafts.save(content)
+            self._record(content, "draft")
+            return PipelineResult(content=content, status="draft", draft_id=draft_id)
+
         return self.publish(content)
 
     def approve_draft(self, draft_id: str) -> PipelineResult:
-        content = self.drafts.load(draft_id)
+        try:
+            content = self.drafts.load(draft_id)
+        except StorageError as exc:
+            return PipelineResult(
+                content=PostContent(topic="", platform="unknown", text=""),
+                status="failed",
+                error=str(exc),
+            )
+
+        if self.history.has_posted(content):
+            self.drafts.delete(draft_id)
+            return PipelineResult(content=content, status="skipped_duplicate")
+
         result = self.publish(content)
-        self.drafts.delete(draft_id)
+        if result.status == "posted":
+            self.drafts.delete(draft_id)
         return result
