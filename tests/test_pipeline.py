@@ -103,7 +103,9 @@ def test_approve_draft_skips_already_posted_content(settings):
     draft_result = pipeline.run_once(topic="already live", platform="mock")
     pipeline.approve_draft(draft_result.draft_id)
 
-    draft_again = pipeline.run_once(topic="already live", platform="mock")
-    retry = pipeline.approve_draft(draft_again.draft_id)
+    content = pipeline.generator.generate(topic="already live", platform="mock")
+    draft_id = pipeline.drafts.save(content)
+    retry = pipeline.approve_draft(draft_id)
 
     assert retry.status == "skipped_duplicate"
+    assert draft_id not in pipeline.drafts.list_drafts()
